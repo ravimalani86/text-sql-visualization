@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI Analytics Chat</title>
+    <link rel="stylesheet" href="./app.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <h2 class="sidebar-title">History</h2>
+          <div class="sidebar-actions">
+            <a class="button button-secondary nav-link-btn" href="./dashboard.html">Dashboard</a>
+            <button id="btnNewConversation" class="button button-secondary">New</button>
+          </div>
+        </div>
+        <div id="historyList" class="history-list"></div>
+      </aside>
+
+      <section class="content">
+        <header class="content-header">
+          <div>
+            <h1 class="title">AI Analytics Chat</h1>
+            <p class="subtitle">Ask naturally. AI responds with text, table, chart, or SQL as needed.</p>
+          </div>
+        </header>
+
+        <section id="chatTimeline" class="chat-timeline"></section>
+
+        <section class="composer">
+          <label class="label" for="prompt">Message</label>
+          <textarea
+            id="prompt"
+            class="textarea"
+            placeholder="e.g. Give me all products with total sales in 2025"
+          ></textarea>
+          <div id="error" class="error hidden"></div>
+          <div class="composer-actions">
+            <button id="btnAnalyze" class="button">Send</button>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script src="../plotly-chart-wc/dist/plotly-chart-wc/browser/main.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
+

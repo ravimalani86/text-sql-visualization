@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pinned Dashboard</title>
+    <link rel="stylesheet" href="./dashboard.css" />
+  </head>
+  <body>
+    <main class="dashboard-page">
+      <header class="topbar">
+        <div>
+          <h1 class="title">Pinned Dashboard</h1>
+          <p class="subtitle">Saved charts with live SQL refresh</p>
+        </div>
+        <div class="topbar-actions">
+          <button id="btnRefreshAll" class="button">Refresh All</button>
+          <a href="./index.html" class="button button-secondary nav-link">Back to Chat</a>
+        </div>
+      </header>
+
+      <section class="summary-row">
+        <div class="summary-card">
+          <p class="summary-label">Total Charts</p>
+          <p id="totalCharts" class="summary-value">0</p>
+        </div>
+        <div class="summary-card">
+          <p class="summary-label">Last Reload</p>
+          <p id="lastReload" class="summary-value muted">-</p>
+        </div>
+      </section>
+
+      <div id="dashboardError" class="error hidden"></div>
+      <section id="dashboardGrid" class="dashboard-grid"></section>
+    </main>
+
+    <script src="../plotly-chart-wc/dist/plotly-chart-wc/browser/main.js"></script>
+    <script src="./dashboard.js"></script>
+  </body>
+</html>

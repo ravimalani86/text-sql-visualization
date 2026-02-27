@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+psycopg[binary]
+sqlalchemy>=2.0
+pandas
+python-multipart
+openai>=1.40.0
+jinja2

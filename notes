@@ -1,0 +1,13 @@
+docker compose build --no-cache
+docker compose up
+
+docker compose build frontend
+
+docker compose up --build
+
+docker compose config
+docker compose config --services
+
+pip install --no-cache-dir -r requirements.txt
+set USE_QWEN=1
+python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
