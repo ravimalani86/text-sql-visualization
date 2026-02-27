@@ -107,5 +107,5 @@ Then open:
 ## Notes
 
 - Backend currently allows only `SELECT` / `WITH` SQL execution for safety.
-- CORS is configured for local frontend ports `3000`, `3001`, and `3002`.
+- CORS is configured for local frontend ports `3000`.
 - Keep `backend-python/.env` private and never commit real API keys.
