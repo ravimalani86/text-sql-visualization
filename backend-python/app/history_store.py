@@ -216,6 +216,23 @@ def get_latest_success_turn(engine: Engine, conversation_id: str) -> Optional[Di
     return dict(row) if row else None
 
 
+def get_latest_success_turns(engine: Engine, conversation_id: str, limit: int = 5) -> List[Dict[str, Any]]:
+    with engine.connect() as conn:
+        rows = conn.execute(
+            text(
+                """
+                SELECT id::text, prompt, sql, columns, data, chart_intent, plotly, created_at
+                FROM conversation_turns
+                WHERE conversation_id = CAST(:id AS UUID) AND status = 'success'
+                ORDER BY created_at DESC
+                LIMIT :limit
+                """
+            ),
+            {"id": conversation_id, "limit": limit},
+        ).mappings().all()
+    return [dict(r) for r in rows]
+
+
 def list_conversations(engine: Engine) -> List[Dict[str, Any]]:
     with engine.connect() as conn:
         rows = conn.execute(

@@ -1,7 +1,7 @@
 # backend/app/main.py
 
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 from fastapi import FastAPI, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,7 +21,6 @@ from app.history_store import (
     create_conversation,
     conversation_exists,
     save_turn,
-    get_latest_success_turn,
     list_conversations as list_saved_conversations,
     get_conversation_with_turns,
     pin_chart,
@@ -29,6 +28,7 @@ from app.history_store import (
     get_pinned_chart,
     delete_pinned_chart,
     update_pinned_chart_layout,
+    get_latest_success_turns,
 )
 
 
@@ -234,24 +234,30 @@ def _looks_incomplete_followup(prompt: str) -> bool:
     return short_request and not has_metric and not has_explicit_change
 
 
-def _build_effective_prompt(prompt: str, latest_turn: Optional[Dict[str, Any]]) -> str:
-    if not latest_turn:
+def _build_effective_prompt(prompt: str, latest_turns: Optional[List[Dict[str, Any]]]) -> str:
+    if not latest_turns:
         return prompt
 
-    prev_prompt = (latest_turn.get("prompt") or "").strip()
-    prev_sql = (latest_turn.get("sql") or "").strip()
-    prev_columns = latest_turn.get("columns") or []
-    if not isinstance(prev_columns, list):
-        prev_columns = []
+    # Show oldest -> newest for context readability
+    turns = list(reversed(latest_turns))
+    turns_context = []
+    for i, t in enumerate(turns, start=1):
+        tp = (t.get("prompt") or "").strip()
+        tsql = (t.get("sql") or "").strip()
+        tcols = t.get("columns") or []
+        if not isinstance(tcols, list):
+            tcols = []
+        turns_context.append(
+            f"Turn {i} - Previous user request: {tp}\n- Previous generated SQL: {tsql}\n- Previous result columns: {', '.join(str(c) for c in tcols)}"
+        )
 
     continuation_mode = "incomplete follow-up" if _looks_incomplete_followup(prompt) else "follow-up"
     context_header = (
         "You are continuing an existing analytics conversation.\n"
         f"Continuation mode: {continuation_mode}\n\n"
-        "Previous turn context:\n"
-        f"- Previous user request: {prev_prompt}\n"
-        f"- Previous generated SQL: {prev_sql}\n"
-        f"- Previous result columns: {', '.join(str(c) for c in prev_columns)}\n\n"
+        "Previous turns context:\n"
+        + "\n\n".join(turns_context)
+        + "\n\n"
         "Follow-up SQL rules:\n"
         "1) Treat current request as continuation of previous analysis.\n"
         "2) If current request is incomplete/ambiguous, reuse previous metric, aggregation, grouping, and sorting.\n"
@@ -261,58 +267,6 @@ def _build_effective_prompt(prompt: str, latest_turn: Optional[Dict[str, Any]]) 
         f"Current user request:\n{prompt}"
     )
     return context_header
-
-
-@app.post("/generate-sql/")
-async def generate_sql(prompt: str = Form(...)):
-    """Generate SQL from prompt only (no execution)."""
-    schema = get_db_schema(engine)
-    if not schema:
-        raise HTTPException(status_code=400, detail="No tables found in database")
-    sql = text_to_sql(prompt, schema)
-    sql = normalize_and_validate_sql(sql)
-    return {"sql": sql}
-
-
-@app.post("/execute-query/")
-async def execute_query(sql: str = Form(...)):
-    """Execute SQL and return columns + data (no chart)."""
-    sql = normalize_and_validate_sql(sql)
-    with engine.connect() as conn:
-        result = conn.execute(text(sql))
-        columns = list(result.keys())
-        rows = [dict(row._mapping) for row in result]
-    return {"sql": sql, "columns": columns, "data": rows}
-
-
-@app.post("/generate-chart/")
-async def generate_chart(
-    sql: str = Form(...),
-    columns: str = Form(...),  # JSON array string
-    prompt: str = Form(""),    # optional; when empty, use SQL as context
-):
-    import json as _json
-    try:
-        cols = _json.loads(columns)
-    except Exception:
-        raise HTTPException(status_code=400, detail="Invalid columns JSON")
-    if not isinstance(cols, list):
-        raise HTTPException(status_code=400, detail="columns must be an array")
-
-    chart_prompt = (prompt or "").strip() or f"Visualize this query result: {sql[:300]}"
-
-    sql = normalize_and_validate_sql(sql)
-
-    chart_intent = suggest_chart_intent(user_prompt=chart_prompt, sql=sql, columns=cols)
-
-    with engine.connect() as conn:
-        result = conn.execute(text(sql))
-        out_columns = list(result.keys())
-        out_rows = [dict(row._mapping) for row in result]
-
-    fig = build_plotly_figure(intent=chart_intent, columns=out_columns, rows=out_rows) if chart_intent.get("make_chart") else None
-
-    return {"chart_intent": chart_intent, "plotly": fig}
 
 
 @app.post("/analyze/")
@@ -332,8 +286,9 @@ async def analyze(
         title=user_prompt[:120],
     )
 
-    latest_turn = get_latest_success_turn(engine, conversation_id)
-    effective_prompt = _build_effective_prompt(user_prompt, latest_turn)
+    latest_turns = get_latest_success_turns(engine, conversation_id, limit=5)
+    latest_turn = latest_turns[0] if latest_turns else None
+    effective_prompt = _build_effective_prompt(user_prompt, latest_turns)
 
     sql: Optional[str] = None
     out_columns: Optional[list[str]] = None
@@ -408,6 +363,14 @@ async def analyze(
                         "type": "chart",
                         "chart_type": chart_intent.get("chart_type"),
                         "plotly": fig,
+                        # Added pin action metadata so frontend can show a pin icon and call pin endpoint
+                        "pin_action": {
+                            "title": user_prompt[:120] or "Pinned chart",
+                            "sql": sql,
+                            "chart_type": chart_intent.get("chart_type"),
+                            "x_field": chart_intent.get("x"),
+                            "y_field": chart_intent.get("y"),
+                        },
                     }
                 )
         else:
@@ -445,6 +408,18 @@ async def analyze(
                 chart_intent=chart_intent,
                 plotly=fig,
             )
+            # If a plotly figure was generated, add pin_action block so frontend can render pin icon
+            if fig:
+                response_blocks.append(
+                    {
+                        "type": "pin_action",
+                        "title": user_prompt[:120] or "Pinned chart",
+                        "sql": sql,
+                        "chart_type": chart_intent.get("chart_type"),
+                        "x_field": chart_intent.get("x"),
+                        "y_field": chart_intent.get("y"),
+                    }
+                )
 
         turn_id = save_turn(
             engine,
