@@ -135,19 +135,22 @@ body {
 }
 
 .message {
-  border: 1px solid var(--border);
-  background: var(--panel-bg);
-  margin-bottom: 10px;
-  padding: 10px;
+  max-width: 75%;
 }
 
 .message.user {
-  margin-left: 16%;
+  margin-left: auto;
   background: rgba(231, 240, 255, 0.85);
 }
 
 .message.assistant {
-  margin-right: 8%;
+  margin-right: auto;
+}
+
+@media (max-width:768px) {
+  .message {
+    max-width: 100%;
+  }
 }
 
 .message-role {
@@ -267,10 +270,8 @@ body {
 
 .table-wrapper {
   width: 100%;
-  overflow: auto;
-  max-height: 260px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
-  background: #fff;
+  overflow-x: auto;
+  overflow-y: auto;
 }
 
 .table {
@@ -328,19 +329,58 @@ td {
   display: block;
 }
 
-@media (max-width: 1024px) {
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.menu-btn {
+  display: none;
+  font-size: 20px;
+  border: 1px solid var(--border);
+  background: #fff;
+  padding: 6px 10px;
+  cursor: pointer;
+}
+
+.sidebar-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .25);
+  z-index: 90;
+  display: none;
+}
+
+.sidebar-overlay.show {
+  display: block;
+}
+
+/* Tablet + Mobile */
+@media (max-width:1024px) {
+
+  .menu-btn {
+    display: block;
+  }
+
   .app-shell {
     grid-template-columns: 1fr;
-    height: auto;
-    min-height: 100vh;
   }
 
   .sidebar {
-    max-height: 240px;
+    position: fixed;
+    left: -280px;
+    top: 0;
+    width: 280px;
+    height: 100vh;
+    z-index: 100;
+    background: #fff;
+    transition: left .25s ease;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, .2);
   }
 
-  .content {
-    grid-template-rows: auto minmax(320px, 1fr) auto;
+  .sidebar.show {
+    left: 0;
   }
 
   .message.user,

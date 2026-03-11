@@ -7,6 +7,24 @@
   const btnNewConversation = document.getElementById('btnNewConversation');
   const historyList = document.getElementById('historyList');
   const chatTimeline = document.getElementById('chatTimeline');
+  const sidebar = document.querySelector('.sidebar');
+  const btnToggleSidebar = document.getElementById('btnToggleSidebar');
+  const content = document.querySelector('.content');
+
+  if (btnToggleSidebar && sidebar) {
+    btnToggleSidebar.addEventListener('click', (e) => {
+      e.stopPropagation();
+      sidebar.classList.toggle('show');
+    });
+  }
+
+  if (content && sidebar) {
+    content.addEventListener('click', () => {
+      if (window.innerWidth <= 1024) {
+        sidebar.classList.remove('show');
+      }
+    });
+  }
 
   const state = {
     conversationId: null,

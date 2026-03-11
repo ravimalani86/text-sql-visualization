@@ -1,7 +1,6 @@
-# backend/app/main.py
-
 from datetime import datetime
 from typing import Any, Dict, Optional, List
+import time
 
 from fastapi import FastAPI, UploadFile, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,6 +30,50 @@ from app.history_store import (
     get_latest_success_turns,
 )
 
+MAX_RESULT_ROWS = 500
+_SCHEMA_CACHE: Optional[Dict[str, Any]] = None
+_SCHEMA_CACHE_TS: Optional[float] = None
+_SCHEMA_CACHE_TTL_SECONDS = 300.0
+
+
+def _truncate(text: str, max_len: int) -> str:
+    value = (text or "").strip()
+    if len(value) <= max_len:
+        return value
+    return value[: max_len - 3] + "..."
+
+
+def _get_cached_schema() -> Dict[str, Any]:
+    """
+    Cache the database schema for a short period to avoid
+    repeated introspection on every request.
+    """
+    global _SCHEMA_CACHE, _SCHEMA_CACHE_TS
+    now = time.time()
+    if _SCHEMA_CACHE is not None and _SCHEMA_CACHE_TS is not None:
+        if now - _SCHEMA_CACHE_TS < _SCHEMA_CACHE_TTL_SECONDS:
+            return _SCHEMA_CACHE
+
+    schema = get_db_schema(engine)
+    _SCHEMA_CACHE = schema
+    _SCHEMA_CACHE_TS = now
+    return schema
+
+
+def _execute_sql(sql: str, max_rows: int = MAX_RESULT_ROWS) -> tuple[list[str], list[dict[str, Any]]]:
+    """
+    Run a read-only SQL query and cap the number of materialized rows.
+    """
+    with engine.connect() as conn:
+        result = conn.execute(text(sql))
+        columns = list(result.keys())
+        rows: list[dict[str, Any]] = []
+        for i, row in enumerate(result):
+            if i >= max_rows:
+                break
+            rows.append(dict(row._mapping))
+    return columns, rows
+
 
 def normalize_and_validate_sql(sql: str) -> str:
     """
@@ -38,7 +81,7 @@ def normalize_and_validate_sql(sql: str) -> str:
     Allow SELECT and WITH (CTE); reject others.
     """
     if not sql or not sql.strip():
-        raise HTTPException(status_code=400, detail="Empty SQL")
+        raise HTTPException(status_code=400, detail="Empty SQL from SQL generator")
     # Take only first statement (multiple queries => run only one)
     first = sql.strip().split(";")[0].strip()
     if not first:
@@ -156,8 +199,6 @@ def _classify_intent(prompt: str) -> str:
         "good evening",
         "bye",
     }
-    if text_low in conversation_phrases:
-        return "CONVERSATION"
 
     data_words = [
         "data",
@@ -191,7 +232,18 @@ def _classify_intent(prompt: str) -> str:
         "category",
         "region",
     ]
-    if any(w in text_low for w in data_words):
+
+    has_data_word = any(w in text_low for w in data_words)
+    # Short, purely social messages without data intent
+    if not has_data_word:
+        # Exact simple phrases
+        if text_low in conversation_phrases:
+            return "CONVERSATION"
+        # Very short greetings / thanks variants
+        if len(text_low.split()) <= 4 and any(p in text_low for p in conversation_phrases):
+            return "CONVERSATION"
+
+    if has_data_word:
         return "DATA_QUERY"
 
     return "CONVERSATION"
@@ -242,13 +294,15 @@ def _build_effective_prompt(prompt: str, latest_turns: Optional[List[Dict[str, A
     turns = list(reversed(latest_turns))
     turns_context = []
     for i, t in enumerate(turns, start=1):
-        tp = (t.get("prompt") or "").strip()
-        tsql = (t.get("sql") or "").strip()
+        tp = _truncate(t.get("prompt") or "", 160)
+        tsql = _truncate(t.get("sql") or "", 320)
         tcols = t.get("columns") or []
         if not isinstance(tcols, list):
             tcols = []
         turns_context.append(
-            f"Turn {i} - Previous user request: {tp}\n- Previous generated SQL: {tsql}\n- Previous result columns: {', '.join(str(c) for c in tcols)}"
+            f"Turn {i} - Previous user request: {tp}\n"
+            f"- Previous generated SQL: {tsql}\n"
+            f"- Previous result columns: {', '.join(str(c) for c in tcols[:10])}"
         )
 
     continuation_mode = "incomplete follow-up" if _looks_incomplete_followup(prompt) else "follow-up"
@@ -260,10 +314,10 @@ def _build_effective_prompt(prompt: str, latest_turns: Optional[List[Dict[str, A
         + "\n\n"
         "Follow-up SQL rules:\n"
         "1) Treat current request as continuation of previous analysis.\n"
-        "2) If current request is incomplete/ambiguous, reuse previous metric, aggregation, grouping, and sorting.\n"
+        "2) If current request is incomplete/ambiguous, REUSE the previous metric, aggregation, grouping, and sorting.\n"
         "3) Only change the parts explicitly requested now (e.g., LIMIT, chart category, time filter).\n"
-        "4) Do NOT change metric unless user clearly specifies a new metric.\n"
-        "5) Keep table/column references valid for current schema.\n\n"
+        "4) Do NOT change the metric unless the user clearly specifies a new metric.\n"
+        "5) Keep table/column references valid for the current schema.\n\n"
         f"Current user request:\n{prompt}"
     )
     return context_header
@@ -374,17 +428,14 @@ async def analyze(
                     }
                 )
         else:
-            schema = get_db_schema(engine)
+            schema = _get_cached_schema()
             if not schema:
                 raise HTTPException(status_code=400, detail="No tables found in database")
 
             sql = text_to_sql(effective_prompt, schema)
             sql = normalize_and_validate_sql(sql)
 
-            with engine.connect() as conn:
-                result = conn.execute(text(sql))
-                out_columns = list(result.keys())
-                out_rows = [dict(row._mapping) for row in result]
+            out_columns, out_rows = _execute_sql(sql, max_rows=MAX_RESULT_ROWS)
 
             chart_prompt = user_prompt or f"Visualize this query result: {sql[:300]}"
             chart_intent = suggest_chart_intent(
@@ -530,10 +581,7 @@ async def api_refresh_chart(chart_id: str):
         raise HTTPException(status_code=404, detail="Chart not found")
 
     sql = normalize_and_validate_sql(chart.get("sql_query") or "")
-    with engine.connect() as conn:
-        result = conn.execute(text(sql))
-        out_columns = list(result.keys())
-        out_rows = [dict(row._mapping) for row in result]
+    out_columns, out_rows = _execute_sql(sql, max_rows=MAX_RESULT_ROWS)
 
     chart_intent: Dict[str, Any] = {
         "make_chart": True,
