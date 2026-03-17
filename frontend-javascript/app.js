@@ -5,11 +5,66 @@
   const elError = document.getElementById('error');
   const btnAnalyze = document.getElementById('btnAnalyze');
   const btnNewConversation = document.getElementById('btnNewConversation');
+  const btnImportData = document.getElementById('btnImportData');
+  const importCsvInput = document.getElementById('importCsvInput');
+  const importMessage = document.getElementById('importMessage');
   const historyList = document.getElementById('historyList');
   const chatTimeline = document.getElementById('chatTimeline');
   const sidebar = document.querySelector('.sidebar');
   const btnToggleSidebar = document.getElementById('btnToggleSidebar');
   const content = document.querySelector('.content');
+
+  function setImportMessage(msg, isError) {
+    if (!importMessage) return;
+    if (!msg) {
+      importMessage.classList.add('hidden');
+      importMessage.textContent = '';
+      importMessage.classList.remove('import-message-success', 'import-message-error');
+      return;
+    }
+    importMessage.textContent = msg;
+    importMessage.classList.remove('hidden');
+    importMessage.classList.toggle('import-message-error', !!isError);
+    importMessage.classList.toggle('import-message-success', !isError);
+    window.clearTimeout(importMessage._hideTimer);
+    importMessage._hideTimer = window.setTimeout(() => setImportMessage(''), 5000);
+  }
+
+  if (btnImportData && importCsvInput) {
+    btnImportData.addEventListener('click', () => importCsvInput.click());
+    importCsvInput.addEventListener('change', async () => {
+      const file = importCsvInput.files && importCsvInput.files[0];
+      importCsvInput.value = '';
+      if (!file) return;
+      if (!file.name.toLowerCase().endsWith('.csv')) {
+        setImportMessage('Please select a .csv file.', true);
+        return;
+      }
+      const prevText = btnImportData.textContent;
+      btnImportData.disabled = true;
+      btnImportData.textContent = 'Uploading…';
+      setImportMessage('');
+      try {
+        const form = new FormData();
+        form.append('file', file);
+        const res = await fetch(`${API}/upload-csv/`, { method: 'POST', body: form });
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}));
+          const detail = errBody.detail || await res.text().catch(() => '') || `Upload failed: ${res.status}`;
+          setImportMessage(typeof detail === 'string' ? detail : JSON.stringify(detail), true);
+          return;
+        }
+        const data = await res.json();
+        const tableName = data.table || file.name.replace(/\.csv$/i, '').toLowerCase();
+        setImportMessage(`Imported as table: ${tableName}`, false);
+      } catch (err) {
+        setImportMessage(err && err.message ? err.message : 'Upload failed', true);
+      } finally {
+        btnImportData.disabled = false;
+        btnImportData.textContent = prevText;
+      }
+    });
+  }
 
   if (btnToggleSidebar && sidebar) {
     btnToggleSidebar.addEventListener('click', (e) => {

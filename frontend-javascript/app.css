@@ -61,6 +61,27 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+.import-message {
+  padding: 8px 12px;
+  margin: 8px 14px 0;
+  font-size: 13px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+}
+
+.import-message-success {
+  color: #166534;
+  background: #dcfce7;
+  border-color: #86efac;
+}
+
+.import-message-error {
+  color: #b91c1c;
+  background: #fee2e2;
+  border-color: #fecaca;
 }
 
 .history-list {
