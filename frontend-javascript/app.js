@@ -322,7 +322,7 @@
 
       const assistantMsg = document.createElement('article');
       assistantMsg.className = 'message assistant';
-      assistantMsg.innerHTML = `<div class="message-role">AI</div><div class="message-body"></div>`;
+      assistantMsg.innerHTML = `<div class="message-role">NIA</div><div class="message-body"></div>`;
       const body = assistantMsg.querySelector('.message-body');
       const blocks = normalizeBlocks(turn);
 

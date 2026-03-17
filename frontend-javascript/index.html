@@ -27,9 +27,9 @@
           <div class="header-left">
             <button id="btnToggleSidebar" class="menu-btn">☰</button>
             <div>
-              <h1 class="title">AI Analytics Chat</h1>
+              <h1 class="title">NIA Analytics Chat</h1>
               <p class="subtitle">
-                Ask naturally. AI responds with text, table, chart, or SQL as needed.
+                Ask naturally. NIA responds with text, table, chart, or SQL as needed.
               </p>
             </div>
           </div>
@@ -37,17 +37,40 @@
 
         <section id="chatTimeline" class="chat-timeline"></section>
 
-        <section class="composer">
-          <label class="label" for="prompt">Message</label>
-          <textarea
-            id="prompt"
-            class="textarea"
-            placeholder="e.g. Give me all products with total sales in 2025"
-          ></textarea>
-          <div id="error" class="error hidden"></div>
-          <div class="composer-actions">
-            <button id="btnAnalyze" class="button">Send</button>
+        <section class="composer" aria-label="Message composer">
+          <div class="composer-bar">
+            <button
+              class="composer-icon"
+              type="button"
+              title="Add (coming soon)"
+              aria-label="Add"
+              disabled
+            >
+              +
+            </button>
+
+            <textarea
+              id="prompt"
+              class="composer-input"
+              placeholder="Ask anything"
+              aria-label="Message"
+            ></textarea>
+
+            <div class="composer-right">
+              <button
+                class="composer-icon"
+                type="button"
+                title="Voice (coming soon)"
+                aria-label="Voice"
+                disabled
+              >
+                🎙️
+              </button>
+              <button id="btnAnalyze" class="composer-send" type="button">Send</button>
+            </div>
           </div>
+
+          <div id="error" class="error hidden"></div>
         </section>
       </section>
     </main>

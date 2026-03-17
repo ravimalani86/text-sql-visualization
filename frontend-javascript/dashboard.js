@@ -2,6 +2,7 @@
     const API = String(window.API_BASE || 'http://localhost:8000').replace(/\/$/, '');
     const ICON_REFRESH = '↻';
     const ICON_UNPIN = '✕';
+    const GRID_CELL_PX = 80;
 
     const btnRefreshAll = document.getElementById('btnRefreshAll');
     const totalCharts = document.getElementById('totalCharts');
@@ -99,9 +100,42 @@
         });
     }
 
-    async function persistOrder() {
-        const updates = state.charts.map((c, idx) => ({ ...c, sort_order: idx }));
-        state.charts = updates;
+    function getChartById(chartId) {
+        return state.charts.find((c) => c.id === chartId) || null;
+    }
+
+    function sortChartsInState() {
+        state.charts.sort((a, b) => {
+            const ao = Number.isFinite(a.sort_order) ? a.sort_order : Number.POSITIVE_INFINITY;
+            const bo = Number.isFinite(b.sort_order) ? b.sort_order : Number.POSITIVE_INFINITY;
+            if (ao !== bo) return ao - bo;
+            return String(a.id).localeCompare(String(b.id));
+        });
+    }
+
+    async function persistFromGrid() {
+        if (!grid) return;
+        const nodes = (grid.engine && Array.isArray(grid.engine.nodes)) ? grid.engine.nodes : [];
+
+        // Sort by visual order (top-to-bottom, left-to-right)
+        const ordered = [...nodes].sort((a, b) => (a.y - b.y) || (a.x - b.x));
+
+        const updates = [];
+        for (let idx = 0; idx < ordered.length; idx++) {
+            const n = ordered[idx];
+            if (!n || !n.el) continue;
+            const chartId = n.el.dataset && n.el.dataset.id ? n.el.dataset.id : null;
+            if (!chartId) continue;
+
+            const chart = getChartById(chartId);
+            if (!chart) continue;
+
+            chart.sort_order = idx;
+            chart.width_units = n.w;
+            chart.height_px = n.h * GRID_CELL_PX;
+            updates.push(chart);
+        }
+
         await Promise.all(updates.map((c) => persistLayout(c)));
     }
 
@@ -125,7 +159,7 @@
         if (!grid) {
             grid = GridStack.init({
                 column: 12,
-                cellHeight: 90,
+                cellHeight: GRID_CELL_PX,
                 margin: 12,
                 animate: true,
                 float: false,
@@ -139,16 +173,9 @@
             }, "#dashboardGrid")
 
             // FIX: event handler grid init pachhi
-            grid.on("change", async function (event, items) {
-                items.forEach(item => {
-                    const chart = state.charts[item.y]
-                    if (!chart) return
-
-                    chart.width_units = item.w
-                    chart.height_px = item.h * 80
-                })
-
-                await persistOrder()
+            grid.on("change", async function () {
+                // change can be triggered by drag/resize/compact; always persist by element id
+                await persistFromGrid();
             })
             grid.on("resize", function (event, el) {
                 const chart = el.querySelector("plotly-chart")
@@ -178,9 +205,12 @@
             return
         }
 
-        state.charts.forEach((chart, index) => {
+        sortChartsInState();
+        state.charts.forEach((chart) => {
 
             const card = document.createElement("div")
+            card.className = "chart-card";
+            card.dataset.id = chart.id;
 
             card.innerHTML = `
             <div class="grid-stack-item-content">
@@ -198,9 +228,12 @@
                 <div class="chart-box"></div>
             </div>`
 
+            const w = Number.isFinite(chart.width_units) ? chart.width_units : 4;
+            const heightPx = Number.isFinite(chart.height_px) ? chart.height_px : 320;
+            const h = Math.max(2, Math.round(heightPx / GRID_CELL_PX));
             const node = {
-                w: 4,
-                h: 4
+                w,
+                h
             }
 
             grid.addWidget(card, node)
@@ -301,19 +334,22 @@
         await refreshRenderedCards();
     }
 
-    btnRefreshAll.addEventListener('click', () => {
-        loadCharts()
-            .then(() => {
-                setTimeout(() => {
-                    if (grid) {
-                        grid.compact();
-                    }
-                    window.dispatchEvent(new Event("resize"));
-                }, 100);
-            })
-            .catch((err) => {
-                setError(err && err.message ? err.message : 'Failed to refresh dashboard');
-            });
+    btnRefreshAll.addEventListener('click', async () => {
+        setError(null);
+        btnRefreshAll.disabled = true;
+        const prev = btnRefreshAll.textContent;
+        btnRefreshAll.textContent = 'Refreshing…';
+        try {
+            // Refresh data only; do not reload charts or compact grid (prevents layout reset)
+            await refreshRenderedCards();
+            setSummary();
+            setTimeout(() => window.dispatchEvent(new Event("resize")), 120);
+        } catch (err) {
+            setError(err && err.message ? err.message : 'Failed to refresh dashboard');
+        } finally {
+            btnRefreshAll.disabled = false;
+            btnRefreshAll.textContent = prev || 'Refresh All';
+        }
     });
 
     setError(null);
@@ -321,9 +357,6 @@
     loadCharts()
         .then(() => {
             setTimeout(() => {
-                if (grid) {
-                    grid.compact();
-                }
                 window.dispatchEvent(new Event("resize"));
             }, 100);
         })
