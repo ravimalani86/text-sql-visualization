@@ -58,7 +58,6 @@ def _pick_default_xy(columns: List[str], rows: List[Dict[str, Any]]) -> Tuple[Op
     if not y:
         return None, None
 
-    # Prefer date-like or first non-numeric as x
     for c in columns:
         if c == y:
             continue
@@ -82,14 +81,8 @@ def build_plotly_figure(
     columns: List[str],
     rows: List[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
-    """
-    Backend-only: map real rows -> Plotly JSON (no LLM involved).
-
-    Returns Plotly figure dict: { "data": [...], "layout": {...} } or None if not possible.
-    """
     if not rows or not columns:
         return None
-
     if not isinstance(intent, dict) or not intent.get("make_chart"):
         return None
 
@@ -117,7 +110,6 @@ def build_plotly_figure(
         "legend": {"orientation": "h"},
     }
 
-    # Pie uses labels/values instead of x/y axis
     if chart_type == "pie":
         if not x_col:
             return None
@@ -127,7 +119,7 @@ def build_plotly_figure(
         if not pairs:
             return None
         labels2, values2 = zip(*pairs)
-        fig = {
+        return {
             "data": [
                 {
                     "type": "pie",
@@ -139,10 +131,8 @@ def build_plotly_figure(
             ],
             "layout": {"title": {"text": title}, "margin": layout["margin"], "legend": layout["legend"]},
         }
-        return fig
 
     if not x_col:
-        # If no x column, plot index on x
         x_vals: List[Any] = list(range(1, len(rows) + 1))
         layout["xaxis"]["title"]["text"] = "index"
     else:
@@ -161,15 +151,12 @@ def build_plotly_figure(
         if chart_type == "scatter":
             return {"type": "scatter", "mode": "markers", "x": list(xs), "y": list(ys), "name": name}
         if chart_type in ("horizontal_bar",):
-            # Long category labels often get clipped; allow Plotly to expand margins.
             layout["margin"]["l"] = max(int(layout["margin"].get("l", 56) or 56), 120)
             return {"type": "bar", "orientation": "h", "x": list(ys), "y": [str(_to_label(v)) for v in xs], "name": name}
-        # default: bar-like
         return {"type": "bar", "x": [str(_to_label(v)) for v in xs], "y": list(ys), "name": name}
 
     traces: List[Dict[str, Any]] = []
     if series_col:
-        # Group rows by series value
         groups: Dict[str, List[Dict[str, Any]]] = {}
         for r in rows:
             key = _to_label(r.get(series_col))

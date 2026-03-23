@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-import json
-import uuid
 from datetime import date, datetime
 from decimal import Decimal
+import json
+import uuid
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import Engine, text
@@ -65,22 +65,8 @@ def init_history_tables(engine: Engine) -> None:
                 """
             )
         )
-        conn.execute(
-            text(
-                """
-                ALTER TABLE conversation_turns
-                ADD COLUMN IF NOT EXISTS assistant_text TEXT
-                """
-            )
-        )
-        conn.execute(
-            text(
-                """
-                ALTER TABLE conversation_turns
-                ADD COLUMN IF NOT EXISTS response_blocks JSONB
-                """
-            )
-        )
+        conn.execute(text("ALTER TABLE conversation_turns ADD COLUMN IF NOT EXISTS assistant_text TEXT"))
+        conn.execute(text("ALTER TABLE conversation_turns ADD COLUMN IF NOT EXISTS response_blocks JSONB"))
         conn.execute(
             text(
                 """
@@ -89,27 +75,6 @@ def init_history_tables(engine: Engine) -> None:
                 """
             )
         )
-        conn.execute(
-            text(
-                """
-                CREATE TABLE IF NOT EXISTS charts (
-                    id UUID PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    sql_query TEXT NOT NULL,
-                    chart_type TEXT NOT NULL,
-                    x_field TEXT,
-                    y_field TEXT,
-                    sort_order INT NOT NULL DEFAULT 0,
-                    width_units INT NOT NULL DEFAULT 1,
-                    height_px INT NOT NULL DEFAULT 320,
-                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
-            )
-        )
-        conn.execute(text("ALTER TABLE charts ADD COLUMN IF NOT EXISTS sort_order INT NOT NULL DEFAULT 0"))
-        conn.execute(text("ALTER TABLE charts ADD COLUMN IF NOT EXISTS width_units INT NOT NULL DEFAULT 1"))
-        conn.execute(text("ALTER TABLE charts ADD COLUMN IF NOT EXISTS height_px INT NOT NULL DEFAULT 320"))
 
 
 def create_conversation(engine: Engine, *, title: Optional[str] = None) -> str:
@@ -197,23 +162,6 @@ def save_turn(
             {"id": conversation_id},
         )
     return turn_id
-
-
-def get_latest_success_turn(engine: Engine, conversation_id: str) -> Optional[Dict[str, Any]]:
-    with engine.connect() as conn:
-        row = conn.execute(
-            text(
-                """
-                SELECT id::text, prompt, sql, columns, data, chart_intent, plotly, created_at
-                FROM conversation_turns
-                WHERE conversation_id = CAST(:id AS UUID) AND status = 'success'
-                ORDER BY created_at DESC
-                LIMIT 1
-                """
-            ),
-            {"id": conversation_id},
-        ).mappings().first()
-    return dict(row) if row else None
 
 
 def get_latest_success_turns(engine: Engine, conversation_id: str, limit: int = 5) -> List[Dict[str, Any]]:
@@ -308,113 +256,3 @@ def get_conversation_with_turns(engine: Engine, conversation_id: str) -> Optiona
 
     return {"conversation": dict(conv), "turns": [dict(t) for t in turns]}
 
-
-def pin_chart(
-    engine: Engine,
-    *,
-    title: str,
-    sql_query: str,
-    chart_type: str,
-    x_field: Optional[str],
-    y_field: Optional[str],
-) -> Dict[str, Any]:
-    chart_id = _new_id()
-    with engine.begin() as conn:
-        max_order = conn.execute(text("SELECT COALESCE(MAX(sort_order), -1) FROM charts")).scalar()
-        next_order = int(max_order) + 1
-        row = conn.execute(
-            text(
-                """
-                INSERT INTO charts (id, title, sql_query, chart_type, x_field, y_field, sort_order, width_units, height_px)
-                VALUES (CAST(:id AS UUID), :title, :sql_query, :chart_type, :x_field, :y_field, :sort_order, 1, 320)
-                RETURNING id::text AS id, title, sql_query, chart_type, x_field, y_field, sort_order, width_units, height_px, created_at
-                """
-            ),
-            {
-                "id": chart_id,
-                "title": title,
-                "sql_query": sql_query,
-                "chart_type": chart_type,
-                "x_field": x_field,
-                "y_field": y_field,
-                "sort_order": next_order,
-            },
-        ).mappings().first()
-    return dict(row)
-
-
-def list_pinned_charts(engine: Engine) -> List[Dict[str, Any]]:
-    with engine.connect() as conn:
-        rows = conn.execute(
-            text(
-                """
-                SELECT id::text AS id, title, sql_query, chart_type, x_field, y_field, sort_order, width_units, height_px, created_at
-                FROM charts
-                ORDER BY sort_order ASC, created_at ASC
-                """
-            )
-        ).mappings().all()
-    return [dict(r) for r in rows]
-
-
-def get_pinned_chart(engine: Engine, chart_id: str) -> Optional[Dict[str, Any]]:
-    with engine.connect() as conn:
-        row = conn.execute(
-            text(
-                """
-                SELECT id::text AS id, title, sql_query, chart_type, x_field, y_field, sort_order, width_units, height_px, created_at
-                FROM charts
-                WHERE id = CAST(:id AS UUID)
-                """
-            ),
-            {"id": chart_id},
-        ).mappings().first()
-    return dict(row) if row else None
-
-
-def delete_pinned_chart(engine: Engine, chart_id: str) -> bool:
-    with engine.begin() as conn:
-        deleted = conn.execute(
-            text("DELETE FROM charts WHERE id = CAST(:id AS UUID)"),
-            {"id": chart_id},
-        )
-    return bool((deleted.rowcount or 0) > 0)
-
-
-def update_pinned_chart_layout(
-    engine: Engine,
-    *,
-    chart_id: str,
-    sort_order: Optional[int] = None,
-    width_units: Optional[int] = None,
-    height_px: Optional[int] = None,
-) -> Optional[Dict[str, Any]]:
-    updates: List[str] = []
-    params: Dict[str, Any] = {"id": chart_id}
-
-    if sort_order is not None:
-        updates.append("sort_order = :sort_order")
-        params["sort_order"] = int(sort_order)
-    if width_units is not None:
-        updates.append("width_units = :width_units")
-        params["width_units"] = max(1, min(2, int(width_units)))
-    if height_px is not None:
-        updates.append("height_px = :height_px")
-        params["height_px"] = max(220, min(620, int(height_px)))
-
-    if not updates:
-        return get_pinned_chart(engine, chart_id)
-
-    with engine.begin() as conn:
-        row = conn.execute(
-            text(
-                f"""
-                UPDATE charts
-                SET {", ".join(updates)}
-                WHERE id = CAST(:id AS UUID)
-                RETURNING id::text AS id, title, sql_query, chart_type, x_field, y_field, sort_order, width_units, height_px, created_at
-                """
-            ),
-            params,
-        ).mappings().first()
-    return dict(row) if row else None

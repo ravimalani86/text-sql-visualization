@@ -59,16 +59,17 @@ def build_response_blocks(
 ) -> List[Dict[str, Any]]:
     blocks: List[Dict[str, Any]] = []
 
-    text_block = {
-        "type": "text",
-        "content": build_assistant_text(
-            prompt=prompt,
-            columns=columns,
-            rows=rows,
-            chart_intent=chart_intent,
-        ),
-    }
-    blocks.append(text_block)
+    blocks.append(
+        {
+            "type": "text",
+            "content": build_assistant_text(
+                prompt=prompt,
+                columns=columns,
+                rows=rows,
+                chart_intent=chart_intent,
+            ),
+        }
+    )
 
     wants_sql = _prompt_has(prompt, ["sql", "query", "statement", "show query", "generated query"])
     wants_chart = _prompt_has(prompt, ["chart", "graph", "plot", "trend", "visual"])
@@ -99,3 +100,4 @@ def build_response_blocks(
         )
 
     return blocks
+

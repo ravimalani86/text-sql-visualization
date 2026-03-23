@@ -10,5 +10,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# App code will be mounted via volume, NOT copied
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+# Copy source
+COPY src ./src
+
+# Ensure `src/` layout is importable
+ENV PYTHONPATH=/app/src
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

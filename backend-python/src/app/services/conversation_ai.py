@@ -1,17 +1,11 @@
-import os
+from __future__ import annotations
 
-from openai import OpenAI
-
-
-def _client() -> OpenAI:
-    api_key = os.getenv("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY environment variable is not set")
-    return OpenAI(api_key=api_key)
+from app.services.openai_client import get_openai_client
 
 
 def generate_conversation_reply(user_prompt: str) -> str:
-    response = _client().responses.create(
+    client = get_openai_client()
+    response = client.responses.create(
         model="gpt-5",
         input=[
             {
@@ -26,3 +20,4 @@ def generate_conversation_reply(user_prompt: str) -> str:
         ],
     )
     return (response.output_text or "").strip() or "How can I help you today?"
+

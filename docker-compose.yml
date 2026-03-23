@@ -15,6 +15,19 @@ services:
       retries: 20
     restart: unless-stopped
 
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
   backend-python:
     build:
       context: ./backend-python
@@ -25,7 +38,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./backend-python/app:/app/app
+      - ./backend-python/src:/app/src
     depends_on:
       postgres:
         condition: service_healthy
