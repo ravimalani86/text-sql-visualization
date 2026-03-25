@@ -41,6 +41,7 @@ async def api_pin_chart(payload: ChartPinRequest) -> Dict[str, Any]:
         chart_type=chart_type,
         x_field=(payload.x_field or "").strip() or None,
         y_field=(payload.y_field or "").strip() or None,
+        series_field=(payload.series_field or "").strip() or None,
     )
     return {"item": saved}
 
@@ -60,16 +61,25 @@ async def api_refresh_chart(chart_id: str) -> Dict[str, Any]:
         chart_intent["x"] = chart.get("x_field")
     if chart.get("y_field") in out_columns:
         chart_intent["y"] = chart.get("y_field")
+    if chart.get("series_field") in out_columns:
+        chart_intent["series"] = chart.get("series_field")
 
     # If x/y are missing but columns exist, let the LLM help pick meaningful roles.
-    if out_columns and ("x" not in chart_intent or "y" not in chart_intent):
+    if out_columns and ("x" not in chart_intent or "y" not in chart_intent or (chart_intent.get("chart_type") in ("grouped_bar", "stacked_bar", "stacked_area") and "series" not in chart_intent)):
         refined = suggest_chart_intent(
             user_prompt="Refresh pinned chart",
             sql=sql,
             columns=out_columns,
         )
         if refined:
-            chart_intent.update(refined)
+            # Keep pinned chart_type authoritative for dashboard refresh.
+            # Use AI only to fill missing axis/series fields.
+            if "x" not in chart_intent and refined.get("x") in out_columns:
+                chart_intent["x"] = refined.get("x")
+            if "y" not in chart_intent and refined.get("y") in out_columns:
+                chart_intent["y"] = refined.get("y")
+            if "series" not in chart_intent and refined.get("series") in out_columns:
+                chart_intent["series"] = refined.get("series")
 
     fig = build_plotly_figure(intent=chart_intent, columns=out_columns, rows=out_rows) if out_rows else None
     return {

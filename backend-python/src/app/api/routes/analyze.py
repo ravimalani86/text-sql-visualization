@@ -174,6 +174,7 @@ def _analyze_core(
                             "chart_type": chart_intent.get("chart_type"),
                             "x_field": chart_intent.get("x"),
                             "y_field": chart_intent.get("y"),
+                            "series_field": chart_intent.get("series"),
                         },
                     }
                 )
@@ -232,6 +233,7 @@ def _analyze_core(
                         "chart_type": chart_intent.get("chart_type"),
                         "x_field": chart_intent.get("x"),
                         "y_field": chart_intent.get("y"),
+                        "series_field": chart_intent.get("series"),
                     }
                 )
 

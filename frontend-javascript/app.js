@@ -420,6 +420,7 @@
       chart_type: chartType || intent.chart_type || 'bar',
       x_field: intent.x || null,
       y_field: intent.y || null,
+      series_field: intent.series || null,
     };
     await postJson('/api/charts/pin', payload);
     await loadPinnedKeys();

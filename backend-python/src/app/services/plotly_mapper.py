@@ -82,6 +82,89 @@ def _pick_default_xy(columns: List[str], rows: List[Dict[str, Any]]) -> Tuple[Op
     return None, y
 
 
+def _base_plotly_config() -> Dict[str, Any]:
+    return {
+        "responsive": True,
+        "displayModeBar": False,
+        "displaylogo": False,
+        "scrollZoom": False,
+    }
+
+
+def _base_layout(*, title: str, x_title: str, y_title: str, horizontal: bool = False) -> Dict[str, Any]:
+    axis_common: Dict[str, Any] = {
+        "automargin": True,
+        "showgrid": True,
+        "gridcolor": "rgba(148, 163, 184, 0.25)",
+        "zeroline": False,
+        "showline": True,
+        "linecolor": "rgba(148, 163, 184, 0.45)",
+        "ticks": "outside",
+        "ticklen": 4,
+        "tickcolor": "rgba(148, 163, 184, 0.6)",
+        "tickfont": {"size": 12, "color": "#0f172a"},
+        "title": {"text": ""},
+    }
+
+    xaxis = {**axis_common, "title": {"text": x_title}}
+    yaxis = {**axis_common, "title": {"text": y_title}}
+    # Helps avoid label overlap/clipping on smaller chart sizes.
+    xaxis["ticklabeloverflow"] = "hide past domain"
+    yaxis["ticklabeloverflow"] = "hide past domain"
+    if horizontal:
+        xaxis["title"]["text"] = y_title
+        yaxis["title"]["text"] = x_title
+
+    return {
+        "template": "plotly_white",
+        "paper_bgcolor": "#ffffff",
+        "plot_bgcolor": "#ffffff",
+        "font": {"family": "Inter, Segoe UI, Roboto, Arial, sans-serif", "size": 13, "color": "#0f172a"},
+        "title": {
+            "text": title,
+            "x": 0.5,
+            "xanchor": "center",
+            "y": 0.98,
+            "yanchor": "top",
+            "font": {"size": 15, "color": "#0f172a"},
+            "pad": {"t": 6, "b": 10},
+            "automargin": True,
+        },
+        # Keep margins compact; specific chart types can override.
+        "margin": {"l": 64 if horizontal else 56, "r": 18, "t": 56, "b": 92},
+        "showlegend": True,
+        "legend": {
+            "orientation": "h",
+            "x": 0,
+            "y": -0.25,
+            "xanchor": "left",
+            "yanchor": "top",
+            "bgcolor": "rgba(255,255,255,0)",
+        },
+        # Professional, high-separation palette for clearer multi-series distinction
+        "colorway": [
+            "#2563EB", 
+            "#0EA5E9",
+            "#14B8A6",
+            "#22C55E",
+            "#84CC16",
+            "#F59E0B",
+            "#F97316",
+            "#EF4444",
+            "#A855F7",
+            "#EC4899",
+            "#1D4ED8",
+            "#0F766E",
+            "#0891B2",
+            "#0284C7",
+            "#4B5563" 
+        ],
+        "hoverlabel": {"bgcolor": "#0f172a", "font": {"color": "white"}},
+        "xaxis": xaxis,
+        "yaxis": yaxis,
+    }
+
+
 def build_plotly_figure(
     *,
     intent: Dict[str, Any],
@@ -119,16 +202,41 @@ def build_plotly_figure(
     title = intent.get("title") if isinstance(intent.get("title"), str) else None
     title = title or "Query Result"
 
-    layout: Dict[str, Any] = {
-        "title": {"text": title},
-        "margin": {"l": 56, "r": 20, "t": 52, "b": 48},
-        "xaxis": {"title": {"text": x_col or ""}, "automargin": True},
-        "yaxis": {"title": {"text": y_col}, "automargin": True},
-        "legend": {"orientation": "h"},
-    }
-    if chart_type == "horizontal_bar":
-        layout["xaxis"]["title"]["text"] = y_col
-        layout["yaxis"]["title"]["text"] = x_col or ""
+    layout: Dict[str, Any] = _base_layout(
+        title=title,
+        x_title=x_col or "",
+        y_title=y_col,
+        horizontal=(chart_type == "horizontal_bar"),
+    )
+    config: Dict[str, Any] = _base_plotly_config()
+
+    # --- UI polish for ALL charts ---
+    max_x_label_len = 0
+    if x_col:
+        for r in rows[:200]:
+            v = _to_label(r.get(x_col))
+            if len(v) > max_x_label_len:
+                max_x_label_len = len(v)
+
+    # Avoid clipped category labels for horizontal bars.
+    if chart_type == "horizontal_bar" and x_col:
+        layout["margin"]["l"] = max(int(layout["margin"].get("l", 56) or 56), min(280, 64 + max_x_label_len * 7))
+
+    # If x labels are long and chart is likely categorical, rotate and add bottom margin.
+    if chart_type in ("bar", "grouped_bar", "stacked_bar", "combo") and x_col and max_x_label_len >= 10:
+        layout["xaxis"]["tickangle"] = -35
+        layout["margin"]["b"] = max(int(layout["margin"].get("b", 54) or 54), min(140, 54 + max_x_label_len * 3))
+
+    # If too many x categories, reduce tick font a bit.
+    if x_col and len(rows) >= 16:
+        try:
+            layout["xaxis"]["tickfont"]["size"] = 11
+        except Exception:
+            pass
+        # Also reduce the number of ticks to avoid collisions when space is tight.
+        layout["xaxis"]["nticks"] = 6
+    elif x_col and len(rows) >= 10:
+        layout["xaxis"]["nticks"] = 8
 
     if chart_type == "pie":
         if not x_col:
@@ -139,6 +247,7 @@ def build_plotly_figure(
         if not pairs:
             return None
         labels2, values2 = zip(*pairs)
+        pie_layout = {**layout, "xaxis": None, "yaxis": None}
         return {
             "data": [
                 {
@@ -147,9 +256,11 @@ def build_plotly_figure(
                     "values": list(values2),
                     "textinfo": "label+percent",
                     "hoverinfo": "label+value+percent",
+                    "marker": {"line": {"color": "#ffffff", "width": 1}},
                 }
             ],
-            "layout": {"title": {"text": title}, "margin": layout["margin"], "legend": layout["legend"]},
+            "layout": pie_layout,
+            "config": config,
         }
 
     if not x_col:
@@ -164,18 +275,33 @@ def build_plotly_figure(
             return None
         xs, ys = zip(*pts)
         if chart_type in ("line", "area", "step"):
-            t: Dict[str, Any] = {"type": "scatter", "mode": "lines+markers", "x": list(xs), "y": list(ys), "name": name}
+            t: Dict[str, Any] = {
+                "type": "scatter",
+                "mode": "lines+markers",
+                "x": list(xs),
+                "y": list(ys),
+                "name": name,
+                "line": {"width": 2.5},
+                "marker": {"size": 6},
+            }
             if chart_type == "area":
                 t["fill"] = "tozeroy"
             if chart_type == "step":
                 t["line"] = {"shape": "hv"}
             return t
         if chart_type == "scatter":
-            return {"type": "scatter", "mode": "markers", "x": list(xs), "y": list(ys), "name": name}
+            return {"type": "scatter", "mode": "markers", "x": list(xs), "y": list(ys), "name": name, "marker": {"size": 7}}
         if chart_type in ("horizontal_bar",):
             layout["margin"]["l"] = max(int(layout["margin"].get("l", 56) or 56), 120)
-            return {"type": "bar", "orientation": "h", "x": list(ys), "y": [str(_to_label(v)) for v in xs], "name": name}
-        return {"type": "bar", "x": [str(_to_label(v)) for v in xs], "y": list(ys), "name": name}
+            return {
+                "type": "bar",
+                "orientation": "h",
+                "x": list(ys),
+                "y": [str(_to_label(v)) for v in xs],
+                "name": name,
+                "marker": {"line": {"width": 0}},
+            }
+        return {"type": "bar", "x": [str(_to_label(v)) for v in xs], "y": list(ys), "name": name, "marker": {"line": {"width": 0}}}
 
     traces: List[Dict[str, Any]] = []
     if chart_type == "stacked_area":
@@ -208,7 +334,7 @@ def build_plotly_figure(
             )
         if not traces:
             return None
-        return {"data": traces, "layout": layout}
+        return {"data": traces, "layout": layout, "config": config}
 
     if chart_type == "combo":
         ys = [_to_float(r.get(y_col)) for r in rows]
@@ -221,7 +347,10 @@ def build_plotly_figure(
             {"type": "bar", "x": x_labels, "y": list(ys2), "name": y_col},
             {"type": "scatter", "mode": "lines+markers", "x": x_labels, "y": list(ys2), "name": y_col},
         ]
-        return {"data": traces, "layout": layout}
+        traces[0]["marker"] = {"line": {"width": 0}}
+        traces[1]["line"] = {"width": 2.5}
+        traces[1]["marker"] = {"size": 6}
+        return {"data": traces, "layout": layout, "config": config}
 
     if series_col:
         groups: Dict[str, List[Dict[str, Any]]] = {}
@@ -244,10 +373,19 @@ def build_plotly_figure(
     if not traces:
         return None
 
+    # Keep legend at bottom for all chart types (requested).
+    # Ensure enough space for longer legends.
+    if len(traces) >= 6:
+        layout["margin"]["b"] = max(int(layout["margin"].get("b", 86) or 86), 120)
+
+    # Keep legend always visible (requested). If spacing is tight, rely on legend positioning/margins only.
+    if len(traces) <= 1:
+        layout["margin"]["t"] = max(int(layout["margin"].get("t", 46) or 46), 40)
+
     if chart_type == "stacked_bar":
         layout["barmode"] = "stack"
     elif chart_type == "grouped_bar":
         layout["barmode"] = "group"
 
-    return {"data": traces, "layout": layout}
+    return {"data": traces, "layout": layout, "config": config}
 

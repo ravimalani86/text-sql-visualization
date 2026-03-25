@@ -17,6 +17,7 @@ def init_charts_table(engine: Engine) -> None:
                     chart_type TEXT NOT NULL,
                     x_field TEXT,
                     y_field TEXT,
+                    series_field TEXT,
                     sort_order INT NOT NULL DEFAULT 0,
                     width_units INT NOT NULL DEFAULT 1,
                     height_px INT NOT NULL DEFAULT 320,
@@ -28,6 +29,7 @@ def init_charts_table(engine: Engine) -> None:
         conn.execute(text("ALTER TABLE charts ADD COLUMN IF NOT EXISTS sort_order INT NOT NULL DEFAULT 0"))
         conn.execute(text("ALTER TABLE charts ADD COLUMN IF NOT EXISTS width_units INT NOT NULL DEFAULT 1"))
         conn.execute(text("ALTER TABLE charts ADD COLUMN IF NOT EXISTS height_px INT NOT NULL DEFAULT 320"))
+        conn.execute(text("ALTER TABLE charts ADD COLUMN IF NOT EXISTS series_field TEXT"))
 
 
 def pin_chart(
@@ -38,6 +40,7 @@ def pin_chart(
     chart_type: str,
     x_field: Optional[str],
     y_field: Optional[str],
+    series_field: Optional[str] = None,
 ) -> Dict[str, Any]:
     import uuid
 
@@ -48,9 +51,9 @@ def pin_chart(
         row = conn.execute(
             text(
                 """
-                INSERT INTO charts (id, title, sql_query, chart_type, x_field, y_field, sort_order, width_units, height_px)
-                VALUES (CAST(:id AS UUID), :title, :sql_query, :chart_type, :x_field, :y_field, :sort_order, 1, 320)
-                RETURNING id::text AS id, title, sql_query, chart_type, x_field, y_field, sort_order, width_units, height_px, created_at
+                INSERT INTO charts (id, title, sql_query, chart_type, x_field, y_field, series_field, sort_order, width_units, height_px)
+                VALUES (CAST(:id AS UUID), :title, :sql_query, :chart_type, :x_field, :y_field, :series_field, :sort_order, 1, 320)
+                RETURNING id::text AS id, title, sql_query, chart_type, x_field, y_field, series_field, sort_order, width_units, height_px, created_at
                 """
             ),
             {
@@ -60,6 +63,7 @@ def pin_chart(
                 "chart_type": chart_type,
                 "x_field": x_field,
                 "y_field": y_field,
+                "series_field": series_field,
                 "sort_order": next_order,
             },
         ).mappings().first()
@@ -71,7 +75,7 @@ def list_pinned_charts(engine: Engine) -> List[Dict[str, Any]]:
         rows = conn.execute(
             text(
                 """
-                SELECT id::text AS id, title, sql_query, chart_type, x_field, y_field, sort_order, width_units, height_px, created_at
+                SELECT id::text AS id, title, sql_query, chart_type, x_field, y_field, series_field, sort_order, width_units, height_px, created_at
                 FROM charts
                 ORDER BY sort_order ASC, created_at ASC
                 """
@@ -85,7 +89,7 @@ def get_pinned_chart(engine: Engine, chart_id: str) -> Optional[Dict[str, Any]]:
         row = conn.execute(
             text(
                 """
-                SELECT id::text AS id, title, sql_query, chart_type, x_field, y_field, sort_order, width_units, height_px, created_at
+                SELECT id::text AS id, title, sql_query, chart_type, x_field, y_field, series_field, sort_order, width_units, height_px, created_at
                 FROM charts
                 WHERE id = CAST(:id AS UUID)
                 """

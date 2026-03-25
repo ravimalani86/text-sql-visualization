@@ -11,6 +11,7 @@ class ChartPinRequest(BaseModel):
     chart_type: str
     x_field: Optional[str] = None
     y_field: Optional[str] = None
+    series_field: Optional[str] = None
 
 
 class ChartLayoutRequest(BaseModel):
