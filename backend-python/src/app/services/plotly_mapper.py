@@ -44,6 +44,13 @@ def _to_label(v: Any) -> str:
     return str(v)
 
 
+def _column_is_numeric(col: str, rows: List[Dict[str, Any]]) -> bool:
+    if not col:
+        return False
+    sample = next((r.get(col) for r in rows if r.get(col) is not None), None)
+    return sample is not None and _is_number(sample)
+
+
 def _pick_default_xy(columns: List[str], rows: List[Dict[str, Any]]) -> Tuple[Optional[str], Optional[str]]:
     if not columns or not rows:
         return None, None
@@ -87,6 +94,8 @@ def build_plotly_figure(
         return None
 
     chart_type = str(intent.get("chart_type") or "bar").lower().strip().replace(" ", "_")
+    if chart_type == "column":
+        chart_type = "bar"
     x_col = intent.get("x") if intent.get("x") in columns else None
     y_col = intent.get("y") if intent.get("y") in columns else None
     series_col = intent.get("series") if intent.get("series") in columns else None
@@ -99,6 +108,14 @@ def build_plotly_figure(
     if not y_col:
         return None
 
+    # For horizontal bars, Plotly expects numeric values on the x-axis.
+    # If the intent swapped x/y (common in LLM output), correct it using actual row types.
+    if chart_type == "horizontal_bar" and x_col and y_col:
+        x_is_num = _column_is_numeric(x_col, rows)
+        y_is_num = _column_is_numeric(y_col, rows)
+        if x_is_num and not y_is_num:
+            x_col, y_col = y_col, x_col
+
     title = intent.get("title") if isinstance(intent.get("title"), str) else None
     title = title or "Query Result"
 
@@ -109,6 +126,9 @@ def build_plotly_figure(
         "yaxis": {"title": {"text": y_col}, "automargin": True},
         "legend": {"orientation": "h"},
     }
+    if chart_type == "horizontal_bar":
+        layout["xaxis"]["title"]["text"] = y_col
+        layout["yaxis"]["title"]["text"] = x_col or ""
 
     if chart_type == "pie":
         if not x_col:
@@ -143,10 +163,12 @@ def build_plotly_figure(
         if not pts:
             return None
         xs, ys = zip(*pts)
-        if chart_type in ("line", "area"):
+        if chart_type in ("line", "area", "step"):
             t: Dict[str, Any] = {"type": "scatter", "mode": "lines+markers", "x": list(xs), "y": list(ys), "name": name}
             if chart_type == "area":
                 t["fill"] = "tozeroy"
+            if chart_type == "step":
+                t["line"] = {"shape": "hv"}
             return t
         if chart_type == "scatter":
             return {"type": "scatter", "mode": "markers", "x": list(xs), "y": list(ys), "name": name}
@@ -156,6 +178,51 @@ def build_plotly_figure(
         return {"type": "bar", "x": [str(_to_label(v)) for v in xs], "y": list(ys), "name": name}
 
     traces: List[Dict[str, Any]] = []
+    if chart_type == "stacked_area":
+        if not series_col:
+            return None
+        layout["yaxis"]["title"]["text"] = y_col
+
+        groups: Dict[str, List[Dict[str, Any]]] = {}
+        for r in rows:
+            key = _to_label(r.get(series_col))
+            groups.setdefault(key, []).append(r)
+
+        for key in sorted(groups.keys()):
+            grp = groups[key]
+            xs = [g.get(x_col) if x_col else None for g in grp] if x_col else list(range(1, len(grp) + 1))
+            ys = [_to_float(g.get(y_col)) for g in grp]
+            pts = [(x, y) for x, y in zip(xs, ys) if y is not None]
+            if not pts:
+                continue
+            xs2, ys2 = zip(*pts)
+            traces.append(
+                {
+                    "type": "scatter",
+                    "mode": "lines",
+                    "x": [str(_to_label(v)) for v in xs2],
+                    "y": list(ys2),
+                    "name": key,
+                    "stackgroup": "one",
+                }
+            )
+        if not traces:
+            return None
+        return {"data": traces, "layout": layout}
+
+    if chart_type == "combo":
+        ys = [_to_float(r.get(y_col)) for r in rows]
+        pts = [(x, y) for x, y in zip(x_vals, ys) if y is not None]
+        if not pts:
+            return None
+        xs2, ys2 = zip(*pts)
+        x_labels = [str(_to_label(v)) for v in xs2]
+        traces = [
+            {"type": "bar", "x": x_labels, "y": list(ys2), "name": y_col},
+            {"type": "scatter", "mode": "lines+markers", "x": x_labels, "y": list(ys2), "name": y_col},
+        ]
+        return {"data": traces, "layout": layout}
+
     if series_col:
         groups: Dict[str, List[Dict[str, Any]]] = {}
         for r in rows:

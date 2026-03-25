@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
+import queue
+import threading
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from fastapi import APIRouter, Form, HTTPException
+from fastapi.responses import StreamingResponse
 
 from app.core.config import get_settings
 from app.db.engine import engine
@@ -46,11 +50,20 @@ def _get_cached_schema() -> Dict[str, Any]:
     return schema
 
 
-@router.post("/analyze/")
-async def analyze(
-    prompt: str = Form(...),
-    conversation_id: Optional[str] = Form(None),
+def _ndjson_line(obj: Dict[str, Any]) -> bytes:
+    return (json.dumps(obj, default=str) + "\n").encode("utf-8")
+
+
+def _analyze_core(
+    *,
+    prompt: str,
+    conversation_id: Optional[str],
+    emit_event: Optional[Callable[[Dict[str, Any]], None]] = None,
 ) -> Dict[str, Any]:
+    def emit(payload: Dict[str, Any]) -> None:
+        if emit_event:
+            emit_event(payload)
+
     settings = get_settings()
     user_prompt = (prompt or "").strip()
     if not user_prompt:
@@ -63,6 +76,7 @@ async def analyze(
         engine,
         title=user_prompt[:120],
     )
+    emit({"type": "meta", "conversation_id": conversation_id})
 
     latest_turns = get_latest_success_turns(engine, conversation_id, limit=5)
     latest_turn = latest_turns[0] if latest_turns else None
@@ -79,8 +93,10 @@ async def analyze(
 
     try:
         intent_type = classify_intent(user_prompt)
+        emit({"type": "stage", "name": "intent_classified", "intent_type": intent_type})
         if intent_type == "CONVERSATION":
             assistant_text = generate_conversation_reply(user_prompt)
+            emit({"type": "stage", "name": "assistant_ready", "assistant_text": assistant_text})
             response_blocks = [{"type": "text", "content": assistant_text}]
             turn_id = save_turn(
                 engine,
@@ -125,6 +141,15 @@ async def analyze(
             sql = str(latest_turn.get("sql") or "")
             out_columns = latest_turn.get("columns") or []
             out_rows = latest_turn.get("data") or []
+            emit(
+                {
+                    "type": "stage",
+                    "name": "reused_previous_result",
+                    "columns": out_columns,
+                    "row_count": len(out_rows),
+                    "preview_rows": out_rows[:20],
+                }
+            )
 
             chart_prompt = user_prompt or f"Visualize this query result: {sql[:300]}"
             chart_intent = suggest_chart_intent(
@@ -132,8 +157,10 @@ async def analyze(
                 sql=sql,
                 columns=out_columns,
             )
+            emit({"type": "stage", "name": "chart_intent_ready", "chart_intent": chart_intent})
             if chart_intent.get("make_chart"):
                 fig = build_plotly_figure(intent=chart_intent, columns=out_columns, rows=out_rows)
+                emit({"type": "stage", "name": "chart_ready", "plotly": fig})
             response_blocks = []
             if fig:
                 response_blocks.append(
@@ -157,8 +184,18 @@ async def analyze(
 
             sql = text_to_sql(effective_prompt, schema)
             sql = normalize_and_validate_sql(sql)
+            emit({"type": "stage", "name": "sql_generated", "sql": sql})
 
             out_columns, out_rows = execute_sql(engine=engine, sql=sql, max_rows=settings.max_result_rows)
+            emit(
+                {
+                    "type": "stage",
+                    "name": "query_executed",
+                    "columns": out_columns,
+                    "row_count": len(out_rows),
+                    "preview_rows": out_rows[:20],
+                }
+            )
 
             chart_prompt = user_prompt or f"Visualize this query result: {sql[:300]}"
             chart_intent = suggest_chart_intent(
@@ -166,8 +203,10 @@ async def analyze(
                 sql=sql,
                 columns=out_columns,
             )
+            emit({"type": "stage", "name": "chart_intent_ready", "chart_intent": chart_intent})
             if chart_intent.get("make_chart"):
                 fig = build_plotly_figure(intent=chart_intent, columns=out_columns, rows=out_rows)
+                emit({"type": "stage", "name": "chart_ready", "plotly": fig})
 
             assistant_text = build_assistant_text(
                 prompt=user_prompt,
@@ -175,6 +214,7 @@ async def analyze(
                 rows=out_rows,
                 chart_intent=chart_intent,
             )
+            emit({"type": "stage", "name": "assistant_ready", "assistant_text": assistant_text})
             response_blocks = build_response_blocks(
                 prompt=user_prompt,
                 sql=sql,
@@ -260,4 +300,67 @@ async def analyze(
         "status": "success",
         "created_at": datetime.utcnow().isoformat(),
     }
+
+
+@router.post("/analyze/")
+async def analyze(
+    prompt: str = Form(...),
+    conversation_id: Optional[str] = Form(None),
+) -> Dict[str, Any]:
+    return _analyze_core(prompt=prompt, conversation_id=conversation_id)
+
+
+@router.post("/analyze/stream")
+async def analyze_stream(
+    prompt: str = Form(...),
+    conversation_id: Optional[str] = Form(None),
+) -> StreamingResponse:
+    def generate() -> Any:
+        event_queue: queue.Queue[bytes] = queue.Queue()
+        done = threading.Event()
+
+        def emit(payload: Dict[str, Any]) -> None:
+            event_queue.put(_ndjson_line(payload))
+
+        def worker() -> None:
+            try:
+                final_payload = _analyze_core(prompt=prompt, conversation_id=conversation_id, emit_event=emit)
+                event_queue.put(_ndjson_line({"type": "final", "data": final_payload}))
+            except HTTPException as exc:
+                event_queue.put(
+                    _ndjson_line(
+                        {
+                            "type": "error",
+                            "status_code": exc.status_code,
+                            "detail": exc.detail,
+                        }
+                    )
+                )
+            except Exception as exc:
+                event_queue.put(
+                    _ndjson_line(
+                        {
+                            "type": "error",
+                            "status_code": 500,
+                            "detail": str(exc),
+                        }
+                    )
+                )
+            finally:
+                done.set()
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+
+        while not done.is_set() or not event_queue.empty():
+            try:
+                yield event_queue.get(timeout=0.1)
+            except queue.Empty:
+                continue
+
+    return StreamingResponse(
+        generate(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-cache"},
+    )
 

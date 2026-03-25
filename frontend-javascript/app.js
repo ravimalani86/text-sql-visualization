@@ -116,6 +116,47 @@
     return res.json();
   }
 
+  async function postFormStream(path, fields, onEvent) {
+    const form = new FormData();
+    for (const [k, v] of Object.entries(fields)) {
+      form.append(k, v);
+    }
+
+    const res = await fetch(`${API}${path}`, { method: 'POST', body: form });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => '');
+      throw new Error(txt || `Request failed: ${res.status}`);
+    }
+    if (!res.body) {
+      throw new Error('Streaming is not supported by this browser');
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let nlIdx = buffer.indexOf('\n');
+      while (nlIdx !== -1) {
+        const line = buffer.slice(0, nlIdx).trim();
+        buffer = buffer.slice(nlIdx + 1);
+        if (line) {
+          onEvent(JSON.parse(line));
+        }
+        nlIdx = buffer.indexOf('\n');
+      }
+    }
+
+    const rest = buffer.trim();
+    if (rest) {
+      onEvent(JSON.parse(rest));
+    }
+  }
+
   async function getJson(path) {
     const res = await fetch(`${API}${path}`);
     if (!res.ok) {
@@ -284,6 +325,10 @@
   function normalizeBlocks(turn) {
     const blocks = Array.isArray(turn.response_blocks) ? turn.response_blocks : [];
     if (blocks.length) {
+      const hasChartBlock = blocks.some((b) => b && b.type === 'chart' && b.plotly);
+      if (!hasChartBlock && turn.plotly) {
+        blocks.push({ type: 'chart', chart_type: turn.chart_intent && turn.chart_intent.chart_type, plotly: turn.plotly });
+      }
       return blocks;
     }
 
@@ -395,10 +440,43 @@
       if (state.conversationId) {
         fields.conversation_id = state.conversationId;
       }
-      const data = await postForm('/analyze/', fields);
 
-      state.conversationId = data.conversation_id;
       const turn = {
+        id: null,
+        prompt,
+        sql: null,
+        columns: [],
+        data: [],
+        chart_intent: null,
+        plotly: null,
+        assistant_text: '',
+        response_blocks: [{ type: 'text', content: 'Thinking...' }],
+        status: 'streaming',
+        error: null,
+        created_at: null,
+      };
+      state.turns.push(turn);
+      renderConversation();
+
+      const upsertBlock = (type, block) => {
+        const idx = turn.response_blocks.findIndex((b) => b && b.type === type);
+        if (idx >= 0) {
+          turn.response_blocks[idx] = block;
+        } else {
+          turn.response_blocks.push(block);
+        }
+      };
+      const stageLabelByName = {
+        intent_classified: 'Thinking...',
+        reused_previous_result: 'Using previous query result...',
+        sql_generated: 'SQL generated. Running query...',
+        query_executed: 'Query complete. Preparing table...',
+        chart_intent_ready: 'Analyzing chart intent...',
+        chart_ready: 'Chart is ready.',
+        assistant_ready: 'Preparing final response...',
+      };
+
+      const mapFinalTurn = (data) => ({
         id: data.turn_id,
         prompt: data.prompt,
         sql: data.sql,
@@ -411,9 +489,65 @@
         status: data.status || 'success',
         error: null,
         created_at: data.created_at || null,
-      };
-      state.turns.push(turn);
-      renderConversation();
+      });
+
+      await postFormStream('/analyze/stream', fields, (evt) => {
+        if (!evt || typeof evt !== 'object') return;
+        console.log(evt.type, evt.name)
+        if (evt.type === 'meta' && evt.conversation_id) {
+          state.conversationId = evt.conversation_id;
+        } else if (evt.type === 'stage') {
+          const stageText = stageLabelByName[evt.name] || `Processing: ${String(evt.name || 'working')}`;
+          console.log(stageText)
+          upsertBlock('text', { type: 'text', content: stageText });
+          if (evt.name === 'sql_generated' && evt.sql) {
+            turn.sql = evt.sql;
+            upsertBlock('sql', { type: 'sql', sql: evt.sql });
+          } else if (evt.name === 'query_executed') {
+            const cols = Array.isArray(evt.columns) ? evt.columns : [];
+            const rows = Array.isArray(evt.preview_rows) ? evt.preview_rows : [];
+            turn.columns = cols;
+            turn.data = rows;
+            upsertBlock('table', {
+              type: 'table',
+              columns: cols,
+              rows,
+              meta: {
+                row_count: typeof evt.row_count === 'number' ? evt.row_count : rows.length,
+                shown_rows: rows.length,
+              },
+            });
+          } else if (evt.name === 'chart_intent_ready' && evt.chart_intent) {
+            turn.chart_intent = evt.chart_intent;
+          } else if (evt.name === 'chart_ready' && evt.plotly) {
+            turn.plotly = evt.plotly;
+            upsertBlock('chart', {
+              type: 'chart',
+              chart_type: turn.chart_intent && turn.chart_intent.chart_type,
+              plotly: evt.plotly,
+            });
+          } else if (evt.name === 'assistant_ready') {
+            const text = evt.assistant_text || '';
+            turn.assistant_text = text;
+            upsertBlock('text', { type: 'text', content: text || 'Preparing final response...' });
+          }
+          renderConversation();
+        } else if (evt.type === 'final' && evt.data) {
+          const finalTurn = mapFinalTurn(evt.data);
+          Object.assign(turn, finalTurn);
+          state.conversationId = evt.data.conversation_id || state.conversationId;
+          renderConversation();
+        } else if (evt.type === 'error') {
+          turn.status = 'failed';
+          turn.error = (evt.detail && String(evt.detail)) || 'Something went wrong';
+          if (!turn.response_blocks.length) {
+            turn.response_blocks.push({ type: 'text', content: 'Request failed.' });
+          }
+          renderConversation();
+          throw new Error(turn.error);
+        }
+      });
+
       elPrompt.value = '';
       await loadHistoryList();
     } catch (e) {

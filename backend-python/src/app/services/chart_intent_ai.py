@@ -10,14 +10,18 @@ from app.services.openai_client import get_openai_client
 
 
 ALLOWED_CHART_TYPES = {
+    "area",
     "bar",
+    "column",
+    "combo",
     "grouped_bar",
-    "stacked_bar",
     "horizontal_bar",
     "line",
-    "area",
     "scatter",
     "pie",
+    "stacked_area",
+    "stacked_bar",
+    "step",
 }
 
 _TEMPLATE_PATH = Path(__file__).resolve().parent.parent / "templates" / "chart_intent_system.j2"
