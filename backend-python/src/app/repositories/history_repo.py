@@ -72,6 +72,7 @@ def init_history_tables(engine: Engine) -> None:
         conn.execute(text("ALTER TABLE conversation_turns ADD COLUMN IF NOT EXISTS assistant_text TEXT"))
         conn.execute(text("ALTER TABLE conversation_turns ADD COLUMN IF NOT EXISTS response_blocks JSONB"))
         conn.execute(text("ALTER TABLE conversation_turns ADD COLUMN IF NOT EXISTS prompt_normalized TEXT"))
+        conn.execute(text("ALTER TABLE conversation_turns ADD COLUMN IF NOT EXISTS total_count INTEGER"))
         conn.execute(
             text(
                 """
@@ -139,6 +140,7 @@ def save_turn(
     response_blocks: Optional[List[Dict[str, Any]]],
     status: str,
     error: Optional[str] = None,
+    total_count: Optional[int] = None,
 ) -> str:
     turn_id = _new_id()
     normalized_prompt = _normalize_prompt(prompt)
@@ -148,14 +150,15 @@ def save_turn(
                 """
                 INSERT INTO conversation_turns (
                     id, conversation_id, prompt, prompt_normalized, context_prompt, sql,
-                    columns, data, chart_intent, plotly, assistant_text, response_blocks, status, error
+                    columns, data, chart_intent, plotly, assistant_text, response_blocks,
+                    status, error, total_count
                 )
                 VALUES (
                     CAST(:id AS UUID), CAST(:conversation_id AS UUID), :prompt, :prompt_normalized, :context_prompt, :sql,
                     CAST(:columns AS JSONB), CAST(:data AS JSONB),
                     CAST(:chart_intent AS JSONB), CAST(:plotly AS JSONB),
                     :assistant_text, CAST(:response_blocks AS JSONB),
-                    :status, :error
+                    :status, :error, :total_count
                 )
                 """
             ),
@@ -174,6 +177,7 @@ def save_turn(
                 "response_blocks": _to_json(response_blocks),
                 "status": status,
                 "error": error,
+                "total_count": total_count,
             },
         )
         conn.execute(
@@ -194,7 +198,7 @@ def get_latest_success_turns(engine: Engine, conversation_id: str, limit: int = 
         rows = conn.execute(
             text(
                 """
-                SELECT id::text, prompt, sql, columns, data, chart_intent, plotly, created_at
+                SELECT id::text, prompt, sql, columns, data, chart_intent, plotly, total_count, created_at
                 FROM conversation_turns
                 WHERE conversation_id = CAST(:id AS UUID) AND status = 'success'
                 ORDER BY created_at DESC
@@ -215,7 +219,7 @@ def find_latest_success_by_prompt(engine: Engine, prompt: str) -> Optional[Dict[
         row = conn.execute(
             text(
                 """
-                SELECT id::text, conversation_id::text, prompt, sql, columns, data, chart_intent, plotly, created_at
+                SELECT id::text, conversation_id::text, prompt, sql, columns, data, chart_intent, plotly, total_count, created_at
                 FROM conversation_turns
                 WHERE status = 'success'
                   AND prompt_normalized = :prompt_normalized
@@ -296,6 +300,7 @@ def get_conversation_with_turns(engine: Engine, conversation_id: str) -> Optiona
                     response_blocks,
                     status,
                     error,
+                    total_count,
                     created_at
                 FROM conversation_turns
                 WHERE conversation_id = CAST(:id AS UUID)
@@ -306,4 +311,21 @@ def get_conversation_with_turns(engine: Engine, conversation_id: str) -> Optiona
         ).mappings().all()
 
     return {"conversation": dict(conv), "turns": [dict(t) for t in turns]}
+
+
+def get_turn_by_id(engine: Engine, turn_id: str) -> Optional[Dict[str, Any]]:
+    with engine.connect() as conn:
+        row = conn.execute(
+            text(
+                """
+                SELECT id::text, sql, columns, total_count
+                FROM conversation_turns
+                WHERE id = CAST(:id AS UUID)
+                  AND status = 'success'
+                  AND sql IS NOT NULL
+                """
+            ),
+            {"id": turn_id},
+        ).mappings().first()
+    return dict(row) if row else None
 

@@ -7,6 +7,7 @@ from app.core.config import get_settings
 from app.api.routes.analyze import router as analyze_router
 from app.api.routes.charts import router as charts_router
 from app.api.routes.history import router as history_router
+from app.api.routes.table_data import router as table_data_router
 from app.api.routes.upload import router as upload_router
 from app.db.engine import engine
 from app.repositories.charts_repo import init_charts_table
@@ -33,6 +34,7 @@ def create_app() -> FastAPI:
     app.include_router(analyze_router)
     app.include_router(history_router)
     app.include_router(charts_router)
+    app.include_router(table_data_router)
     app.include_router(upload_router)
 
     return app

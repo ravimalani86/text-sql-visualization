@@ -1,5 +1,6 @@
 (() => {
   const API = String(window.API_BASE || 'http://localhost:8000').replace(/\/$/, '');
+  const DEFAULT_PAGE_SIZE = Number(window.DEFAULT_PAGE_SIZE) || 10;
 
   const elPrompt = document.getElementById('prompt');
   const elError = document.getElementById('error');
@@ -235,16 +236,24 @@
     return pre;
   }
 
-  function createTableBlock(columns, rows, meta) {
+  function createTableBlock(columns, rows, meta, turn) {
     const wrapper = document.createElement('div');
     wrapper.className = 'table-wrapper';
     const allColumns = Array.isArray(columns) ? columns : [];
-    const allRows = Array.isArray(rows) ? rows : [];
-    const state = {
+    let allRows = Array.isArray(rows) ? rows : [];
+    const hasPagination = meta && typeof meta.total_count === 'number' && meta.total_count > (meta.page_size || DEFAULT_PAGE_SIZE);
+    const turnId = (turn && turn.id) || null;
+
+    const tblState = {
       query: '',
       sortBy: null,
       sortDir: null,
       visible: new Set(allColumns),
+      page: (meta && meta.page) || 1,
+      pageSize: (meta && meta.page_size) || DEFAULT_PAGE_SIZE,
+      totalCount: (meta && meta.total_count) || allRows.length,
+      totalPages: (meta && meta.total_pages) || 1,
+      loading: false,
     };
 
     const controls = document.createElement('div');
@@ -253,7 +262,7 @@
     const search = document.createElement('input');
     search.className = 'table-search';
     search.type = 'search';
-    search.placeholder = 'Filter rows...';
+    search.placeholder = 'Search all rows...';
     controls.appendChild(search);
 
     const colToggle = document.createElement('details');
@@ -271,48 +280,57 @@
     const thead = document.createElement('thead');
     const tbody = document.createElement('tbody');
 
+    const paginationBar = document.createElement('div');
+    paginationBar.className = 'table-pagination';
+
+    const infoBar = document.createElement('div');
+    infoBar.className = 'block-meta table-info';
+
     const getCellValue = (row, col) => {
       const hasValue = row && Object.prototype.hasOwnProperty.call(row, col);
       return hasValue ? row[col] : '';
     };
-    const isNumberLike = (val) => {
-      if (typeof val === 'number') return Number.isFinite(val);
-      if (typeof val !== 'string') return false;
-      const n = Number(val.replace(/,/g, '').trim());
-      return Number.isFinite(n);
-    };
-    const toNumber = (val) => {
-      if (typeof val === 'number') return val;
-      if (typeof val !== 'string') return NaN;
-      return Number(val.replace(/,/g, '').trim());
-    };
 
-    const getVisibleColumns = () => allColumns.filter((c) => state.visible.has(c));
-    const getFilteredRows = (visibleCols) => {
-      const q = state.query.trim().toLowerCase();
-      if (!q) return allRows.slice();
-      return allRows.filter((row) =>
-        visibleCols.some((col) => String(getCellValue(row, col) ?? '').toLowerCase().includes(q))
-      );
-    };
-    const getSortedRows = (inputRows) => {
-      if (!state.sortBy || !state.sortDir) return inputRows;
-      const dir = state.sortDir === 'asc' ? 1 : -1;
-      const col = state.sortBy;
-      const output = inputRows.slice();
-      output.sort((a, b) => {
-        const va = getCellValue(a, col);
-        const vb = getCellValue(b, col);
-        if (va == null && vb == null) return 0;
-        if (va == null) return 1;
-        if (vb == null) return -1;
-        if (isNumberLike(va) && isNumberLike(vb)) {
-          return (toNumber(va) - toNumber(vb)) * dir;
+    const getVisibleColumns = () => allColumns.filter((c) => tblState.visible.has(c));
+
+    async function fetchPage(page, sortCol, sortDir) {
+      if (!turnId || tblState.loading) return;
+      tblState.loading = true;
+      wrapper.classList.add('table-loading');
+      try {
+        const body = {
+          turn_id: turnId,
+          page: page,
+          page_size: tblState.pageSize,
+        };
+        if (sortCol) {
+          body.sort_column = sortCol;
+          body.sort_direction = sortDir || 'asc';
         }
-        return String(va).localeCompare(String(vb), undefined, { sensitivity: 'base', numeric: true }) * dir;
-      });
-      return output;
-    };
+        if (tblState.query) {
+          body.search = tblState.query;
+        }
+        const res = await fetch(`${API}/api/table-data`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+        const data = await res.json();
+        allRows = Array.isArray(data.rows) ? data.rows : [];
+        tblState.page = data.meta.page;
+        tblState.totalCount = data.meta.total_count;
+        tblState.totalPages = data.meta.total_pages;
+      } catch (err) {
+        console.error('Pagination fetch error:', err);
+      } finally {
+        tblState.loading = false;
+        wrapper.classList.remove('table-loading');
+        renderTable();
+        renderPagination();
+        renderInfo();
+      }
+    }
 
     const renderColumnToggles = () => {
       colToggleBody.innerHTML = '';
@@ -321,19 +339,19 @@
         item.className = 'table-column-toggle-item';
         const checkbox = document.createElement('input');
         checkbox.type = 'checkbox';
-        checkbox.checked = state.visible.has(col);
+        checkbox.checked = tblState.visible.has(col);
         checkbox.addEventListener('change', () => {
           if (checkbox.checked) {
-            state.visible.add(col);
-          } else if (state.visible.size > 1) {
-            state.visible.delete(col);
+            tblState.visible.add(col);
+          } else if (tblState.visible.size > 1) {
+            tblState.visible.delete(col);
           } else {
             checkbox.checked = true;
             return;
           }
-          if (state.sortBy && !state.visible.has(state.sortBy)) {
-            state.sortBy = null;
-            state.sortDir = null;
+          if (tblState.sortBy && !tblState.visible.has(tblState.sortBy)) {
+            tblState.sortBy = null;
+            tblState.sortDir = null;
           }
           renderTable();
         });
@@ -347,8 +365,7 @@
 
     const renderTable = () => {
       const visibleCols = getVisibleColumns();
-      const filteredRows = getFilteredRows(visibleCols);
-      const finalRows = getSortedRows(filteredRows);
+      const finalRows = allRows;
 
       thead.innerHTML = '';
       tbody.innerHTML = '';
@@ -360,20 +377,25 @@
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'table-sort-btn';
-        const isActive = state.sortBy === col;
-        const icon = isActive ? (state.sortDir === 'asc' ? ' ↑' : ' ↓') : '';
+        const isActive = tblState.sortBy === col;
+        const icon = isActive ? (tblState.sortDir === 'asc' ? ' ↑' : ' ↓') : '';
         btn.textContent = `${col}${icon}`;
         btn.addEventListener('click', () => {
-          if (state.sortBy !== col) {
-            state.sortBy = col;
-            state.sortDir = 'asc';
-          } else if (state.sortDir === 'asc') {
-            state.sortDir = 'desc';
+          if (tblState.sortBy !== col) {
+            tblState.sortBy = col;
+            tblState.sortDir = 'asc';
+          } else if (tblState.sortDir === 'asc') {
+            tblState.sortDir = 'desc';
           } else {
-            state.sortBy = null;
-            state.sortDir = null;
+            tblState.sortBy = null;
+            tblState.sortDir = null;
           }
-          renderTable();
+          if (turnId && hasPagination) {
+            tblState.page = 1;
+            fetchPage(1, tblState.sortBy, tblState.sortDir);
+          } else {
+            renderTable();
+          }
         });
         th.appendChild(btn);
         trh.appendChild(th);
@@ -392,26 +414,89 @@
       }
     };
 
+    const renderPagination = () => {
+      paginationBar.innerHTML = '';
+      if (!hasPagination && tblState.totalPages <= 1) return;
+
+      const makeBtn = (label, page, disabled) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'page-btn';
+        b.textContent = label;
+        b.disabled = disabled || tblState.loading;
+        if (!disabled) {
+          b.addEventListener('click', () => fetchPage(page, tblState.sortBy, tblState.sortDir));
+        }
+        return b;
+      };
+
+      paginationBar.appendChild(makeBtn('« First', 1, tblState.page <= 1));
+      paginationBar.appendChild(makeBtn('‹ Prev', tblState.page - 1, tblState.page <= 1));
+
+      const maxVisible = 5;
+      let startPage = Math.max(1, tblState.page - Math.floor(maxVisible / 2));
+      let endPage = Math.min(tblState.totalPages, startPage + maxVisible - 1);
+      if (endPage - startPage + 1 < maxVisible) {
+        startPage = Math.max(1, endPage - maxVisible + 1);
+      }
+
+      if (startPage > 1) {
+        const dots = document.createElement('span');
+        dots.className = 'page-dots';
+        dots.textContent = '...';
+        paginationBar.appendChild(dots);
+      }
+
+      for (let p = startPage; p <= endPage; p++) {
+        const b = makeBtn(String(p), p, false);
+        if (p === tblState.page) b.classList.add('page-btn-active');
+        paginationBar.appendChild(b);
+      }
+
+      if (endPage < tblState.totalPages) {
+        const dots = document.createElement('span');
+        dots.className = 'page-dots';
+        dots.textContent = '...';
+        paginationBar.appendChild(dots);
+      }
+
+      paginationBar.appendChild(makeBtn('Next ›', tblState.page + 1, tblState.page >= tblState.totalPages));
+      paginationBar.appendChild(makeBtn('Last »', tblState.totalPages, tblState.page >= tblState.totalPages));
+
+      const pageInfo = document.createElement('span');
+      pageInfo.className = 'page-info';
+      pageInfo.textContent = `Page ${tblState.page} of ${tblState.totalPages}`;
+      paginationBar.appendChild(pageInfo);
+    };
+
+    const renderInfo = () => {
+      const shown = allRows.length;
+      infoBar.textContent = `Showing ${shown} of ${tblState.totalCount} rows`;
+    };
+
+    let _searchTimer = null;
     search.addEventListener('input', () => {
-      state.query = search.value || '';
-      renderTable();
+      tblState.query = search.value || '';
+      clearTimeout(_searchTimer);
+      if (turnId && hasPagination) {
+        _searchTimer = setTimeout(() => {
+          tblState.page = 1;
+          fetchPage(1, tblState.sortBy, tblState.sortDir);
+        }, 400);
+      }
     });
 
     renderColumnToggles();
     renderTable();
+    renderPagination();
+    renderInfo();
 
     table.appendChild(thead);
     table.appendChild(tbody);
+    wrapper.appendChild(infoBar);
     wrapper.appendChild(controls);
     wrapper.appendChild(table);
-
-    if (meta && typeof meta.row_count === 'number') {
-      const info = document.createElement('div');
-      info.className = 'block-meta';
-      const shown = typeof meta.shown_rows === 'number' ? meta.shown_rows : allRows.length;
-      info.textContent = `Rows: ${shown}/${meta.row_count}`;
-      wrapper.prepend(info);
-    }
+    wrapper.appendChild(paginationBar);
     return wrapper;
   }
 
@@ -518,7 +603,7 @@
         } else if (block.type === 'sql') {
           body.appendChild(createCodeBlock(block.sql));
         } else if (block.type === 'table') {
-          body.appendChild(createTableBlock(block.columns || [], block.rows || [], block.meta || null));
+          body.appendChild(createTableBlock(block.columns || [], block.rows || [], block.meta || null, turn));
         } else if (block.type === 'chart' && block.plotly) {
           body.appendChild(createChartBlock(block.plotly, block.chart_type, turn));
         }
@@ -628,6 +713,7 @@
         sql: data.sql,
         columns: Array.isArray(data.columns) ? data.columns : [],
         data: Array.isArray(data.data) ? data.data : [],
+        total_count: data.total_count || null,
         chart_intent: data.chart_intent || null,
         plotly: data.plotly || null,
         assistant_text: data.assistant_text || '',
@@ -648,18 +734,25 @@
           if (evt.name === 'sql_generated' && evt.sql) {
             turn.sql = evt.sql;
             upsertBlock('sql', { type: 'sql', sql: evt.sql });
-          } else if (evt.name === 'query_executed') {
+          } else if (evt.name === 'query_executed' || evt.name === 'prompt_cache_hit' || evt.name === 'reused_previous_result') {
             const cols = Array.isArray(evt.columns) ? evt.columns : [];
             const rows = Array.isArray(evt.preview_rows) ? evt.preview_rows : [];
+            const totalCount = typeof evt.total_count === 'number' ? evt.total_count : (typeof evt.row_count === 'number' ? evt.row_count : rows.length);
+            if (evt.sql) turn.sql = evt.sql;
             turn.columns = cols;
             turn.data = rows;
+            turn.total_count = totalCount;
             upsertBlock('table', {
               type: 'table',
               columns: cols,
               rows,
               meta: {
-                row_count: typeof evt.row_count === 'number' ? evt.row_count : rows.length,
+                total_count: totalCount,
+                row_count: totalCount,
                 shown_rows: rows.length,
+                page: evt.page || 1,
+                page_size: evt.page_size || DEFAULT_PAGE_SIZE,
+                total_pages: Math.ceil(totalCount / (evt.page_size || DEFAULT_PAGE_SIZE)),
               },
             });
           } else if (evt.name === 'chart_intent_ready' && evt.chart_intent) {

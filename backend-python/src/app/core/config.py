@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+DEFAULT_PAGE_SIZE = int(os.environ.get("DEFAULT_PAGE_SIZE", "10"))
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -11,6 +13,7 @@ class Settings:
     cors_allow_origins: list[str]
     max_result_rows: int
     schema_cache_ttl_seconds: float
+    default_page_size: int
 
 
 def get_settings() -> Settings:
@@ -31,5 +34,6 @@ def get_settings() -> Settings:
         cors_allow_origins=cors_allow_origins,
         max_result_rows=int(os.environ.get("MAX_RESULT_ROWS", "500")),
         schema_cache_ttl_seconds=float(os.environ.get("SCHEMA_CACHE_TTL_SECONDS", "300")),
+        default_page_size=DEFAULT_PAGE_SIZE,
     )
 

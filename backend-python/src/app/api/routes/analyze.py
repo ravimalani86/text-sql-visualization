@@ -24,9 +24,10 @@ from app.services.conversation_ai import generate_conversation_reply
 from app.services.intent import classify_intent, is_chart_only_prompt
 from app.services.plotly_mapper import build_plotly_figure
 from app.services.prompt_context import build_effective_prompt
+from app.core.config import DEFAULT_PAGE_SIZE
 from app.services.response_builder import build_assistant_text, build_response_blocks
 from app.services.sql_generator import text_to_sql
-from app.services.sql_runtime import execute_sql, normalize_and_validate_sql
+from app.services.sql_runtime import execute_count, execute_sql, normalize_and_validate_sql
 
 
 router = APIRouter(tags=["analyze"])
@@ -86,6 +87,7 @@ def _analyze_core(
     sql: Optional[str] = None
     out_columns: Optional[list[str]] = None
     out_rows: Optional[list[dict[str, Any]]] = None
+    total_count: Optional[int] = None
     chart_intent: Optional[dict[str, Any]] = None
     fig: Optional[dict[str, Any]] = None
     assistant_text: Optional[str] = None
@@ -94,6 +96,7 @@ def _analyze_core(
     response_source = "llm"
     prompt_cache_hit = False
     prompt_mentions_chart = is_chart_only_prompt(user_prompt)
+    page_size = DEFAULT_PAGE_SIZE
 
     try:
         intent_type = classify_intent(user_prompt)
@@ -153,13 +156,17 @@ def _analyze_core(
             sql = str(latest_turn.get("sql") or "")
             out_columns = latest_turn.get("columns") or []
             out_rows = latest_turn.get("data") or []
+            total_count = latest_turn.get("total_count") or len(out_rows)
             emit(
                 {
                     "type": "stage",
                     "name": "reused_previous_result",
                     "columns": out_columns,
                     "row_count": len(out_rows),
+                    "total_count": total_count,
                     "preview_rows": out_rows[:20],
+                    "page": 1,
+                    "page_size": page_size,
                 }
             )
 
@@ -224,6 +231,7 @@ def _analyze_core(
                 sql = str(prompt_cache_turn.get("sql") or "")
                 out_columns = prompt_cache_turn.get("columns") or []
                 out_rows = prompt_cache_turn.get("data") or []
+                total_count = prompt_cache_turn.get("total_count") or len(out_rows)
                 emit(
                     {
                         "type": "stage",
@@ -231,7 +239,10 @@ def _analyze_core(
                         "sql": sql,
                         "columns": out_columns,
                         "row_count": len(out_rows),
+                        "total_count": total_count,
                         "preview_rows": out_rows[:20],
+                        "page": 1,
+                        "page_size": page_size,
                     }
                 )
             else:
@@ -243,6 +254,7 @@ def _analyze_core(
                 sql = normalize_and_validate_sql(sql)
                 emit({"type": "stage", "name": "sql_generated", "sql": sql})
 
+                total_count = execute_count(engine=engine, base_sql=sql)
                 out_columns, out_rows = execute_sql(engine=engine, sql=sql, max_rows=settings.max_result_rows)
                 emit(
                     {
@@ -250,7 +262,10 @@ def _analyze_core(
                         "name": "query_executed",
                         "columns": out_columns,
                         "row_count": len(out_rows),
+                        "total_count": total_count,
                         "preview_rows": out_rows[:20],
+                        "page": 1,
+                        "page_size": page_size,
                     }
                 )
 
@@ -270,6 +285,7 @@ def _analyze_core(
                 columns=out_columns,
                 rows=out_rows,
                 chart_intent=chart_intent,
+                total_count=total_count,
             )
             emit({"type": "stage", "name": "assistant_ready", "assistant_text": assistant_text})
             response_blocks = build_response_blocks(
@@ -279,6 +295,9 @@ def _analyze_core(
                 rows=out_rows,
                 chart_intent=chart_intent,
                 plotly=fig,
+                total_count=total_count,
+                page=1,
+                page_size=page_size,
             )
             if fig:
                 response_blocks.append(
@@ -307,6 +326,7 @@ def _analyze_core(
             response_blocks=response_blocks,
             status="success",
             error=None,
+            total_count=total_count,
         )
     except HTTPException as exc:
         turn_id = save_turn(
@@ -323,6 +343,7 @@ def _analyze_core(
             response_blocks=response_blocks,
             status="failed",
             error=str(exc.detail),
+            total_count=total_count,
         )
         raise exc
     except Exception as exc:
@@ -340,6 +361,7 @@ def _analyze_core(
             response_blocks=response_blocks,
             status="failed",
             error=str(exc),
+            total_count=total_count,
         )
         raise HTTPException(status_code=500, detail=str(exc))
 
@@ -350,7 +372,8 @@ def _analyze_core(
         "intent_type": "DATA_QUERY",
         "sql": sql if not chart_only_intent else None,
         "columns": (out_columns or []) if not chart_only_intent else [],
-        "data": (out_rows or []) if not chart_only_intent else [],
+        "data": (out_rows[:page_size] if out_rows else []) if not chart_only_intent else [],
+        "total_count": total_count,
         "chart_intent": chart_intent or {"make_chart": False},
         "plotly": fig,
         "assistant_text": assistant_text,
