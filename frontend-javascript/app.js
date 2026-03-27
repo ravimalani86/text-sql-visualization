@@ -87,6 +87,7 @@
     conversations: [],
     turns: [],
     pinnedKeys: new Set(),
+    pinnedTableKeys: new Set(),
   };
 
   function setError(msg) {
@@ -192,6 +193,30 @@
       next.add(makePinnedKey(item.sql_query, item.chart_type, item.x_field, item.y_field));
     }
     state.pinnedKeys = next;
+  }
+
+  function makePinnedTableKey(sql) {
+    return String(sql || '').trim();
+  }
+
+  async function loadPinnedTableKeys() {
+    const data = await getJson('/api/tables');
+    const items = Array.isArray(data.items) ? data.items : [];
+    const next = new Set();
+    for (const item of items) {
+      next.add(makePinnedTableKey(item.sql_query));
+    }
+    state.pinnedTableKeys = next;
+  }
+
+  async function pinTableFromTurn(turn) {
+    const payload = {
+      title: (turn.prompt || 'Pinned table').slice(0, 120),
+      sql: turn.sql,
+      columns: Array.isArray(turn.columns) ? turn.columns : null,
+    };
+    await postJson('/api/tables/pin', payload);
+    await loadPinnedTableKeys();
   }
 
   function renderHistory() {
@@ -365,7 +390,7 @@
 
     const renderTable = () => {
       const visibleCols = getVisibleColumns();
-      const finalRows = allRows;
+      const finalRows = allRows.slice(0, tblState.pageSize);
 
       thead.innerHTML = '';
       tbody.innerHTML = '';
@@ -490,6 +515,28 @@
     renderTable();
     renderPagination();
     renderInfo();
+
+    if (turn && turn.sql) {
+      const key = makePinnedTableKey(turn.sql);
+      const isPinned = state.pinnedTableKeys.has(key);
+      const pinBtn = document.createElement('button');
+      pinBtn.className = 'icon-button table-pin-btn';
+      pinBtn.type = 'button';
+      pinBtn.title = isPinned ? 'Already pinned' : 'Pin table to dashboard';
+      pinBtn.textContent = isPinned ? 'Pinned' : '📌';
+      pinBtn.disabled = isPinned;
+      pinBtn.addEventListener('click', async () => {
+        try {
+          await pinTableFromTurn(turn);
+          pinBtn.textContent = 'Pinned';
+          pinBtn.disabled = true;
+          pinBtn.title = 'Already pinned';
+        } catch (err) {
+          setError(err && err.message ? err.message : 'Failed to pin table');
+        }
+      });
+      controls.appendChild(pinBtn);
+    }
 
     table.appendChild(thead);
     table.appendChild(tbody);
@@ -674,7 +721,7 @@
         chart_intent: null,
         plotly: null,
         assistant_text: '',
-        response_blocks: [{ type: 'text', content: 'Thinking...' }],
+        response_blocks: [{ type: 'status', content: 'Thinking...' }],
         status: 'streaming',
         error: null,
         created_at: null,
@@ -816,13 +863,9 @@
 
   // Initial state.
   setError(null);
-  loadPinnedKeys()
-    .then(() => {
-      renderConversation();
-    })
-    .catch(() => {
-      renderConversation();
-    });
+  Promise.all([loadPinnedKeys(), loadPinnedTableKeys()])
+    .then(() => renderConversation())
+    .catch(() => renderConversation());
   loadHistoryList().catch(() => {});
 })();
 

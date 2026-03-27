@@ -7,11 +7,13 @@ from app.core.config import get_settings
 from app.api.routes.analyze import router as analyze_router
 from app.api.routes.charts import router as charts_router
 from app.api.routes.history import router as history_router
+from app.api.routes.pinned_tables import router as pinned_tables_router
 from app.api.routes.table_data import router as table_data_router
 from app.api.routes.upload import router as upload_router
 from app.db.engine import engine
 from app.repositories.charts_repo import init_charts_table
 from app.repositories.history_repo import init_history_tables
+from app.repositories.pinned_tables_repo import init_pinned_tables_table
 
 
 def create_app() -> FastAPI:
@@ -30,10 +32,12 @@ def create_app() -> FastAPI:
     async def _on_startup() -> None:
         init_history_tables(engine)
         init_charts_table(engine)
+        init_pinned_tables_table(engine)
 
     app.include_router(analyze_router)
     app.include_router(history_router)
     app.include_router(charts_router)
+    app.include_router(pinned_tables_router)
     app.include_router(table_data_router)
     app.include_router(upload_router)
 

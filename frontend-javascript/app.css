@@ -573,6 +573,10 @@ td {
   pointer-events: none;
 }
 
+.table-pin-btn {
+  margin-left: auto;
+}
+
 .chart-box {
   width: 100%;
   border-radius: 4px;

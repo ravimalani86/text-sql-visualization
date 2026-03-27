@@ -164,7 +164,7 @@ def _analyze_core(
                     "columns": out_columns,
                     "row_count": len(out_rows),
                     "total_count": total_count,
-                    "preview_rows": out_rows[:20],
+                    "preview_rows": out_rows[:page_size],
                     "page": 1,
                     "page_size": page_size,
                 }
@@ -240,7 +240,7 @@ def _analyze_core(
                         "columns": out_columns,
                         "row_count": len(out_rows),
                         "total_count": total_count,
-                        "preview_rows": out_rows[:20],
+                        "preview_rows": out_rows[:page_size],
                         "page": 1,
                         "page_size": page_size,
                     }
@@ -263,7 +263,7 @@ def _analyze_core(
                         "columns": out_columns,
                         "row_count": len(out_rows),
                         "total_count": total_count,
-                        "preview_rows": out_rows[:20],
+                        "preview_rows": out_rows[:page_size],
                         "page": 1,
                         "page_size": page_size,
                     }

@@ -1,6 +1,7 @@
 :root {
   --bg: linear-gradient(160deg, #e8f4fd 0%, #ede9ff 50%, #f5f0ff 100%);
   --card-bg: rgba(255, 255, 255, 0.86);
+  --surface: rgba(255, 255, 255);
   --text: #1a1a2e;
   --muted: #666;
   --border: rgba(0, 0, 0, 0.08);
@@ -71,9 +72,10 @@ body {
 }
 
 .summary-row {
-  margin-top: 12px;
+  margin-top: 10px;
+  margin-bottom: 10px;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 260px));
+  grid-template-columns: repeat(3, minmax(0, 260px));
   gap: 10px;
 }
 
@@ -297,6 +299,199 @@ plotly-chart {
   width: 100%;
   height: 100%;
 } 
+
+/* Pinned table card */
+.table-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  cursor: grab;
+  margin-bottom: 6px;
+}
+
+.table-card-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+
+.dash-table-wrapper {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.dash-table-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0 6px;
+}
+
+.dash-table-search {
+  width: min(200px, 100%);
+  border: 1px solid rgba(90, 59, 189, 0.24);
+  background: #fff;
+  color: var(--text);
+  border-radius: 5px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.dash-table-info {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 2px 0 4px;
+}
+
+.dash-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  flex: 1 1 auto;
+}
+
+.dash-table th {
+  padding: 6px 8px;
+  text-align: left;
+  font-weight: 600;
+  background: linear-gradient(180deg, #f0eeff 0%, #e8e4ff 100%);
+  border-bottom: 1px solid rgba(107, 70, 193, 0.35);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+}
+
+.dash-sort-btn {
+  border: 0;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  color: #2f275a;
+  padding: 0;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.dash-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  white-space: nowrap;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dash-table-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 6px 0 2px;
+  flex-wrap: wrap;
+}
+
+.dash-page-btn {
+  border: 1px solid rgba(90, 59, 189, 0.24);
+  background: #fff;
+  color: #442b93;
+  border-radius: 4px;
+  padding: 3px 8px;
+  font-size: 11px;
+  cursor: pointer;
+  min-width: 26px;
+  text-align: center;
+}
+
+.dash-page-btn:hover:not([disabled]) {
+  background: #efeaff;
+}
+
+.dash-page-btn[disabled] {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.dash-page-btn-active {
+  background: linear-gradient(135deg, #5b8def 0%, #7c5dd4 100%);
+  color: #fff;
+  border-color: transparent;
+  font-weight: 700;
+}
+
+.dash-page-info {
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: 6px;
+}
+
+.dash-table-loading {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.dash-col-toggle {
+  position: relative;
+  cursor: pointer;
+}
+
+.dash-col-toggle summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.dash-col-toggle summary:hover {
+  background: var(--bg);
+}
+
+.dash-col-toggle-body {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  min-width: 160px;
+  max-height: 240px;
+  overflow-y: auto;
+  box-shadow: 0 4px 16px rgba(0,0,0,.12);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dash-col-toggle-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  padding: 3px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dash-col-toggle-item:hover {
+  background: var(--bg);
+}
+
+.dash-col-toggle-item input[type="checkbox"] {
+  accent-color: var(--primary);
+  margin: 0;
+}
 
 @media (max-width: 920px) {
   .topbar {
