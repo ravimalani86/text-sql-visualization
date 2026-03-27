@@ -15,6 +15,7 @@ from app.db.schema import get_db_schema
 from app.repositories.history_repo import (
     conversation_exists,
     create_conversation,
+    find_latest_success_by_prompt,
     get_latest_success_turns,
     save_turn,
 )
@@ -90,6 +91,9 @@ def _analyze_core(
     assistant_text: Optional[str] = None
     response_blocks: Optional[list[dict[str, Any]]] = None
     chart_only_intent = False
+    response_source = "llm"
+    prompt_cache_hit = False
+    prompt_mentions_chart = is_chart_only_prompt(user_prompt)
 
     try:
         intent_type = classify_intent(user_prompt)
@@ -126,9 +130,17 @@ def _analyze_core(
                 "assistant_text": assistant_text,
                 "response_blocks": response_blocks,
                 "status": "success",
+                "source": response_source,
                 "created_at": datetime.utcnow().isoformat(),
             }
 
+        prompt_cache_turn = find_latest_success_by_prompt(engine, user_prompt)
+        prompt_cache_hit = bool(
+            prompt_cache_turn
+            and prompt_cache_turn.get("sql")
+            and isinstance(prompt_cache_turn.get("columns"), list)
+            and isinstance(prompt_cache_turn.get("data"), list)
+        )
         can_reuse_last_result = bool(
             latest_turn
             and latest_turn.get("sql")
@@ -151,16 +163,44 @@ def _analyze_core(
                 }
             )
 
-            chart_prompt = user_prompt or f"Visualize this query result: {sql[:300]}"
-            chart_intent = suggest_chart_intent(
-                user_prompt=chart_prompt,
-                sql=sql,
-                columns=out_columns,
-            )
-            emit({"type": "stage", "name": "chart_intent_ready", "chart_intent": chart_intent})
-            if chart_intent.get("make_chart"):
-                fig = build_plotly_figure(intent=chart_intent, columns=out_columns, rows=out_rows)
-                emit({"type": "stage", "name": "chart_ready", "plotly": fig})
+            if prompt_cache_hit:
+                cached_chart_intent = prompt_cache_turn.get("chart_intent")
+                cached_plotly = prompt_cache_turn.get("plotly")
+                if isinstance(cached_chart_intent, dict):
+                    chart_intent = cached_chart_intent
+                    emit({"type": "stage", "name": "chart_intent_reused", "chart_intent": chart_intent})
+                else:
+                    chart_intent = {"make_chart": False}
+
+                if isinstance(cached_plotly, dict):
+                    fig = cached_plotly
+                    emit({"type": "stage", "name": "chart_reused", "plotly": fig})
+                elif prompt_mentions_chart:
+                    chart_prompt = user_prompt or f"Visualize this query result: {sql[:300]}"
+                    if chart_intent.get("make_chart"):
+                        fig = build_plotly_figure(intent=chart_intent, columns=out_columns, rows=out_rows)
+                        emit({"type": "stage", "name": "chart_ready", "plotly": fig})
+                    else:
+                        chart_intent = suggest_chart_intent(
+                            user_prompt=chart_prompt,
+                            sql=sql,
+                            columns=out_columns,
+                        )
+                        emit({"type": "stage", "name": "chart_intent_ready", "chart_intent": chart_intent})
+                        if chart_intent.get("make_chart"):
+                            fig = build_plotly_figure(intent=chart_intent, columns=out_columns, rows=out_rows)
+                            emit({"type": "stage", "name": "chart_ready", "plotly": fig})
+            else:
+                chart_prompt = user_prompt or f"Visualize this query result: {sql[:300]}"
+                chart_intent = suggest_chart_intent(
+                    user_prompt=chart_prompt,
+                    sql=sql,
+                    columns=out_columns,
+                )
+                emit({"type": "stage", "name": "chart_intent_ready", "chart_intent": chart_intent})
+                if chart_intent.get("make_chart"):
+                    fig = build_plotly_figure(intent=chart_intent, columns=out_columns, rows=out_rows)
+                    emit({"type": "stage", "name": "chart_ready", "plotly": fig})
             response_blocks = []
             if fig:
                 response_blocks.append(
@@ -179,24 +219,40 @@ def _analyze_core(
                     }
                 )
         else:
-            schema = _get_cached_schema()
-            if not schema:
-                raise HTTPException(status_code=400, detail="No tables found in database")
+            if prompt_cache_hit:
+                response_source = "history_cache"
+                sql = str(prompt_cache_turn.get("sql") or "")
+                out_columns = prompt_cache_turn.get("columns") or []
+                out_rows = prompt_cache_turn.get("data") or []
+                emit(
+                    {
+                        "type": "stage",
+                        "name": "prompt_cache_hit",
+                        "sql": sql,
+                        "columns": out_columns,
+                        "row_count": len(out_rows),
+                        "preview_rows": out_rows[:20],
+                    }
+                )
+            else:
+                schema = _get_cached_schema()
+                if not schema:
+                    raise HTTPException(status_code=400, detail="No tables found in database")
 
-            sql = text_to_sql(effective_prompt, schema)
-            sql = normalize_and_validate_sql(sql)
-            emit({"type": "stage", "name": "sql_generated", "sql": sql})
+                sql = text_to_sql(effective_prompt, schema)
+                sql = normalize_and_validate_sql(sql)
+                emit({"type": "stage", "name": "sql_generated", "sql": sql})
 
-            out_columns, out_rows = execute_sql(engine=engine, sql=sql, max_rows=settings.max_result_rows)
-            emit(
-                {
-                    "type": "stage",
-                    "name": "query_executed",
-                    "columns": out_columns,
-                    "row_count": len(out_rows),
-                    "preview_rows": out_rows[:20],
-                }
-            )
+                out_columns, out_rows = execute_sql(engine=engine, sql=sql, max_rows=settings.max_result_rows)
+                emit(
+                    {
+                        "type": "stage",
+                        "name": "query_executed",
+                        "columns": out_columns,
+                        "row_count": len(out_rows),
+                        "preview_rows": out_rows[:20],
+                    }
+                )
 
             chart_prompt = user_prompt or f"Visualize this query result: {sql[:300]}"
             chart_intent = suggest_chart_intent(
@@ -300,6 +356,7 @@ def _analyze_core(
         "assistant_text": assistant_text,
         "response_blocks": response_blocks or [],
         "status": "success",
+        "source": response_source,
         "created_at": datetime.utcnow().isoformat(),
     }
 

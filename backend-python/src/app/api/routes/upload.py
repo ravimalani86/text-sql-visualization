@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from fastapi import APIRouter, HTTPException, UploadFile
+from fastapi import APIRouter, HTTPException, Query, UploadFile
 from sqlalchemy import inspect, text
 
 from app.db.engine import engine
@@ -35,6 +35,34 @@ async def list_tables() -> Dict[str, Any]:
             items.append({"table": table, "row_count": int(row_count)})
 
     return {"tables": items, "count": len(items)}
+
+
+@router.get("/table-data/")
+async def get_table_data(
+    table_name: str = Query(..., description="Table name"),
+    limit: int = Query(100, description="Number of records")
+) -> Dict[str, Any]:
+
+    inspector = inspect(engine)
+    tables = inspector.get_table_names()
+
+    if table_name not in tables:
+        raise HTTPException(status_code=404, detail="Table not found")
+
+    safe_table = table_name.replace('"', '""')
+
+    with engine.connect() as conn:
+        result = conn.execute(
+            text(f'SELECT * FROM "{safe_table}" LIMIT :limit'),
+            {"limit": limit}
+        )
+        rows = [dict(row._mapping) for row in result]
+
+    return {
+        "table": table_name,
+        "count": len(rows),
+        "records": rows
+    }
 
 
 @router.get("/clear-all-tables/")

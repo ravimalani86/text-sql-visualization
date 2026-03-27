@@ -238,39 +238,177 @@
   function createTableBlock(columns, rows, meta) {
     const wrapper = document.createElement('div');
     wrapper.className = 'table-wrapper';
+    const allColumns = Array.isArray(columns) ? columns : [];
+    const allRows = Array.isArray(rows) ? rows : [];
+    const state = {
+      query: '',
+      sortBy: null,
+      sortDir: null,
+      visible: new Set(allColumns),
+    };
+
+    const controls = document.createElement('div');
+    controls.className = 'table-controls';
+
+    const search = document.createElement('input');
+    search.className = 'table-search';
+    search.type = 'search';
+    search.placeholder = 'Filter rows...';
+    controls.appendChild(search);
+
+    const colToggle = document.createElement('details');
+    colToggle.className = 'table-column-toggle';
+    const colToggleSummary = document.createElement('summary');
+    colToggleSummary.textContent = 'Columns';
+    colToggle.appendChild(colToggleSummary);
+    const colToggleBody = document.createElement('div');
+    colToggleBody.className = 'table-column-toggle-body';
+    colToggle.appendChild(colToggleBody);
+    controls.appendChild(colToggle);
 
     const table = document.createElement('table');
     table.className = 'table';
-
     const thead = document.createElement('thead');
-    const trh = document.createElement('tr');
-    for (const col of columns || []) {
-      const th = document.createElement('th');
-      th.textContent = col;
-      trh.appendChild(th);
-    }
-    thead.appendChild(trh);
-
     const tbody = document.createElement('tbody');
-    for (const row of rows || []) {
-      const tr = document.createElement('tr');
-      for (const col of columns || []) {
-        const td = document.createElement('td');
-        const v = row && Object.prototype.hasOwnProperty.call(row, col) ? row[col] : '';
-        td.textContent = String(v);
-        tr.appendChild(td);
+
+    const getCellValue = (row, col) => {
+      const hasValue = row && Object.prototype.hasOwnProperty.call(row, col);
+      return hasValue ? row[col] : '';
+    };
+    const isNumberLike = (val) => {
+      if (typeof val === 'number') return Number.isFinite(val);
+      if (typeof val !== 'string') return false;
+      const n = Number(val.replace(/,/g, '').trim());
+      return Number.isFinite(n);
+    };
+    const toNumber = (val) => {
+      if (typeof val === 'number') return val;
+      if (typeof val !== 'string') return NaN;
+      return Number(val.replace(/,/g, '').trim());
+    };
+
+    const getVisibleColumns = () => allColumns.filter((c) => state.visible.has(c));
+    const getFilteredRows = (visibleCols) => {
+      const q = state.query.trim().toLowerCase();
+      if (!q) return allRows.slice();
+      return allRows.filter((row) =>
+        visibleCols.some((col) => String(getCellValue(row, col) ?? '').toLowerCase().includes(q))
+      );
+    };
+    const getSortedRows = (inputRows) => {
+      if (!state.sortBy || !state.sortDir) return inputRows;
+      const dir = state.sortDir === 'asc' ? 1 : -1;
+      const col = state.sortBy;
+      const output = inputRows.slice();
+      output.sort((a, b) => {
+        const va = getCellValue(a, col);
+        const vb = getCellValue(b, col);
+        if (va == null && vb == null) return 0;
+        if (va == null) return 1;
+        if (vb == null) return -1;
+        if (isNumberLike(va) && isNumberLike(vb)) {
+          return (toNumber(va) - toNumber(vb)) * dir;
+        }
+        return String(va).localeCompare(String(vb), undefined, { sensitivity: 'base', numeric: true }) * dir;
+      });
+      return output;
+    };
+
+    const renderColumnToggles = () => {
+      colToggleBody.innerHTML = '';
+      for (const col of allColumns) {
+        const item = document.createElement('label');
+        item.className = 'table-column-toggle-item';
+        const checkbox = document.createElement('input');
+        checkbox.type = 'checkbox';
+        checkbox.checked = state.visible.has(col);
+        checkbox.addEventListener('change', () => {
+          if (checkbox.checked) {
+            state.visible.add(col);
+          } else if (state.visible.size > 1) {
+            state.visible.delete(col);
+          } else {
+            checkbox.checked = true;
+            return;
+          }
+          if (state.sortBy && !state.visible.has(state.sortBy)) {
+            state.sortBy = null;
+            state.sortDir = null;
+          }
+          renderTable();
+        });
+        const labelText = document.createElement('span');
+        labelText.textContent = col;
+        item.appendChild(checkbox);
+        item.appendChild(labelText);
+        colToggleBody.appendChild(item);
       }
-      tbody.appendChild(tr);
-    }
+    };
+
+    const renderTable = () => {
+      const visibleCols = getVisibleColumns();
+      const filteredRows = getFilteredRows(visibleCols);
+      const finalRows = getSortedRows(filteredRows);
+
+      thead.innerHTML = '';
+      tbody.innerHTML = '';
+
+      const trh = document.createElement('tr');
+      for (const col of visibleCols) {
+        const th = document.createElement('th');
+        th.className = 'table-th-sortable';
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'table-sort-btn';
+        const isActive = state.sortBy === col;
+        const icon = isActive ? (state.sortDir === 'asc' ? ' ↑' : ' ↓') : '';
+        btn.textContent = `${col}${icon}`;
+        btn.addEventListener('click', () => {
+          if (state.sortBy !== col) {
+            state.sortBy = col;
+            state.sortDir = 'asc';
+          } else if (state.sortDir === 'asc') {
+            state.sortDir = 'desc';
+          } else {
+            state.sortBy = null;
+            state.sortDir = null;
+          }
+          renderTable();
+        });
+        th.appendChild(btn);
+        trh.appendChild(th);
+      }
+      thead.appendChild(trh);
+
+      for (const row of finalRows) {
+        const tr = document.createElement('tr');
+        for (const col of visibleCols) {
+          const td = document.createElement('td');
+          const v = getCellValue(row, col);
+          td.textContent = String(v);
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      }
+    };
+
+    search.addEventListener('input', () => {
+      state.query = search.value || '';
+      renderTable();
+    });
+
+    renderColumnToggles();
+    renderTable();
 
     table.appendChild(thead);
     table.appendChild(tbody);
+    wrapper.appendChild(controls);
     wrapper.appendChild(table);
 
     if (meta && typeof meta.row_count === 'number') {
       const info = document.createElement('div');
       info.className = 'block-meta';
-      const shown = typeof meta.shown_rows === 'number' ? meta.shown_rows : rows.length;
+      const shown = typeof meta.shown_rows === 'number' ? meta.shown_rows : allRows.length;
       info.textContent = `Rows: ${shown}/${meta.row_count}`;
       wrapper.prepend(info);
     }
@@ -372,7 +510,7 @@
       const blocks = normalizeBlocks(turn);
 
       for (const block of blocks) {
-        if (block.type === 'text') {
+        if (block.type === 'text' || block.type === 'status') {
           const p = document.createElement('p');
           p.className = 'message-text';
           p.textContent = block.content || '';
@@ -467,12 +605,19 @@
           turn.response_blocks.push(block);
         }
       };
+      const upsertBottomBlock = (type, block) => {
+        turn.response_blocks = turn.response_blocks.filter((b) => !(b && b.type === type));
+        turn.response_blocks.push(block);
+      };
       const stageLabelByName = {
         intent_classified: 'Thinking...',
         reused_previous_result: 'Using previous query result...',
+        prompt_cache_hit: 'Using saved result from history...',
         sql_generated: 'SQL generated. Running query...',
         query_executed: 'Query complete. Preparing table...',
         chart_intent_ready: 'Analyzing chart intent...',
+        chart_intent_reused: 'Using previous chart intent...',
+        chart_reused: 'Using existing chart...',
         chart_ready: 'Chart is ready.',
         assistant_ready: 'Preparing final response...',
       };
@@ -499,8 +644,7 @@
           state.conversationId = evt.conversation_id;
         } else if (evt.type === 'stage') {
           const stageText = stageLabelByName[evt.name] || `Processing: ${String(evt.name || 'working')}`;
-          console.log(stageText)
-          upsertBlock('text', { type: 'text', content: stageText });
+          upsertBottomBlock('status', { type: 'status', content: stageText });
           if (evt.name === 'sql_generated' && evt.sql) {
             turn.sql = evt.sql;
             upsertBlock('sql', { type: 'sql', sql: evt.sql });
@@ -530,7 +674,7 @@
           } else if (evt.name === 'assistant_ready') {
             const text = evt.assistant_text || '';
             turn.assistant_text = text;
-            upsertBlock('text', { type: 'text', content: text || 'Preparing final response...' });
+            upsertBottomBlock('status', { type: 'status', content: text || 'Preparing final response...' });
           }
           renderConversation();
         } else if (evt.type === 'final' && evt.data) {

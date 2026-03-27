@@ -29,6 +29,10 @@ def _to_json(value: Any) -> Optional[str]:
     return json.dumps(value, default=_json_default)
 
 
+def _normalize_prompt(prompt: str) -> str:
+    return " ".join((prompt or "").strip().lower().split())
+
+
 def init_history_tables(engine: Engine) -> None:
     with engine.begin() as conn:
         conn.execute(
@@ -67,11 +71,30 @@ def init_history_tables(engine: Engine) -> None:
         )
         conn.execute(text("ALTER TABLE conversation_turns ADD COLUMN IF NOT EXISTS assistant_text TEXT"))
         conn.execute(text("ALTER TABLE conversation_turns ADD COLUMN IF NOT EXISTS response_blocks JSONB"))
+        conn.execute(text("ALTER TABLE conversation_turns ADD COLUMN IF NOT EXISTS prompt_normalized TEXT"))
+        conn.execute(
+            text(
+                """
+                UPDATE conversation_turns
+                SET prompt_normalized = LOWER(REGEXP_REPLACE(TRIM(prompt), '\\s+', ' ', 'g'))
+                WHERE prompt_normalized IS NULL
+                """
+            )
+        )
         conn.execute(
             text(
                 """
                 CREATE INDEX IF NOT EXISTS idx_turns_conversation_created
                 ON conversation_turns (conversation_id, created_at DESC)
+                """
+            )
+        )
+        conn.execute(
+            text(
+                """
+                CREATE INDEX IF NOT EXISTS idx_turns_prompt_normalized_success_created
+                ON conversation_turns (prompt_normalized, created_at DESC)
+                WHERE status = 'success' AND prompt_normalized IS NOT NULL
                 """
             )
         )
@@ -118,16 +141,17 @@ def save_turn(
     error: Optional[str] = None,
 ) -> str:
     turn_id = _new_id()
+    normalized_prompt = _normalize_prompt(prompt)
     with engine.begin() as conn:
         conn.execute(
             text(
                 """
                 INSERT INTO conversation_turns (
-                    id, conversation_id, prompt, context_prompt, sql,
+                    id, conversation_id, prompt, prompt_normalized, context_prompt, sql,
                     columns, data, chart_intent, plotly, assistant_text, response_blocks, status, error
                 )
                 VALUES (
-                    CAST(:id AS UUID), CAST(:conversation_id AS UUID), :prompt, :context_prompt, :sql,
+                    CAST(:id AS UUID), CAST(:conversation_id AS UUID), :prompt, :prompt_normalized, :context_prompt, :sql,
                     CAST(:columns AS JSONB), CAST(:data AS JSONB),
                     CAST(:chart_intent AS JSONB), CAST(:plotly AS JSONB),
                     :assistant_text, CAST(:response_blocks AS JSONB),
@@ -139,6 +163,7 @@ def save_turn(
                 "id": turn_id,
                 "conversation_id": conversation_id,
                 "prompt": prompt,
+                "prompt_normalized": normalized_prompt,
                 "context_prompt": context_prompt,
                 "sql": sql,
                 "columns": _to_json(columns),
@@ -179,6 +204,32 @@ def get_latest_success_turns(engine: Engine, conversation_id: str, limit: int = 
             {"id": conversation_id, "limit": limit},
         ).mappings().all()
     return [dict(r) for r in rows]
+
+
+def find_latest_success_by_prompt(engine: Engine, prompt: str) -> Optional[Dict[str, Any]]:
+    normalized_prompt = _normalize_prompt(prompt)
+    if not normalized_prompt:
+        return None
+
+    with engine.connect() as conn:
+        row = conn.execute(
+            text(
+                """
+                SELECT id::text, conversation_id::text, prompt, sql, columns, data, chart_intent, plotly, created_at
+                FROM conversation_turns
+                WHERE status = 'success'
+                  AND prompt_normalized = :prompt_normalized
+                  AND sql IS NOT NULL
+                  AND JSONB_TYPEOF(columns) = 'array'
+                  AND JSONB_TYPEOF(data) = 'array'
+                ORDER BY created_at DESC
+                LIMIT 1
+                """
+            ),
+            {"prompt_normalized": normalized_prompt},
+        ).mappings().first()
+
+    return dict(row) if row else None
 
 
 def list_conversations(engine: Engine) -> List[Dict[str, Any]]:
