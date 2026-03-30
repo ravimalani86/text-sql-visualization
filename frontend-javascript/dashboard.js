@@ -452,6 +452,7 @@
                 </div>
                 <div class="chart-actions">
                     <button class="icon-action-btn btn-refresh">↻</button>
+                    <button class="icon-action-btn btn-followup" title="Follow up in chat">↩</button>
                     <button class="icon-action-btn btn-fullscreen" title="Fullscreen">⛶</button>
                     <button class="icon-action-btn btn-unpin">✕</button>
                 </div>
@@ -480,6 +481,10 @@
             if (ce) openFullscreenChart(ce.config);
         };
         card.querySelector(".btn-refresh").onclick = () => refreshChart(card, chart);
+        card.querySelector(".btn-followup").onclick = () => {
+            const url = `./index.html?followup=chart&id=${encodeURIComponent(chart.id)}`;
+            window.open(url, "_blank", "noopener,noreferrer");
+        };
         card.querySelector(".btn-unpin").onclick = async () => {
             await requestJson(`/api/charts/${chart.id}`, "DELETE");
             state.charts = state.charts.filter(c => c.id !== chart.id);
@@ -501,6 +506,7 @@
                 </div>
                 <div class="chart-actions">
                     <button class="icon-action-btn btn-refresh">↻</button>
+                    <button class="icon-action-btn btn-followup" title="Follow up in chat">↩</button>
                     <button class="icon-action-btn btn-unpin">✕</button>
                 </div>
             </div>
@@ -514,6 +520,10 @@
 
         refreshTableCard(card, tbl);
         card.querySelector(".btn-refresh").onclick = () => refreshTableCard(card, tbl);
+        card.querySelector(".btn-followup").onclick = () => {
+            const url = `./index.html?followup=table&id=${encodeURIComponent(tbl.id)}`;
+            window.open(url, "_blank", "noopener,noreferrer");
+        };
         card.querySelector(".btn-unpin").onclick = async () => {
             await requestJson(`/api/tables/${tbl.id}`, "DELETE");
             state.tables = state.tables.filter(t => t.id !== tbl.id);

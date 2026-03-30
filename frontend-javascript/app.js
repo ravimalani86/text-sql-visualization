@@ -88,6 +88,7 @@
         turns: [],
         pinnedKeys: new Set(),
         pinnedTableKeys: new Set(),
+        followupMode: false,
     };
 
     function setError(msg) {
@@ -231,7 +232,8 @@
 
         for (const conv of state.conversations) {
             const item = document.createElement('button');
-            item.className = `history-item${conv.id === state.conversationId ? ' active' : ''}`;
+            const isActive = !state.followupMode && conv.id === state.conversationId;
+            item.className = `history-item${isActive ? ' active' : ''}`;
             item.type = 'button';
             item.dataset.id = conv.id;
 
@@ -651,8 +653,9 @@
     function normalizeBlocks(turn) {
         const blocks = Array.isArray(turn.response_blocks) ? [...turn.response_blocks] : [];
         if (blocks.length) {
+            const suppressAuto = !!(turn && (turn.suppress_auto_blocks || turn.hide_user));
             const hasChartBlock = blocks.some((b) => b && b.type === 'chart' && b.plotly);
-            if (!hasChartBlock && turn.plotly) {
+            if (!suppressAuto && !hasChartBlock && turn.plotly) {
                 blocks.push({ type: 'chart', chart_type: turn.chart_intent && turn.chart_intent.chart_type, plotly: turn.plotly });
             }
             const nonStatusBlocks = [];
@@ -700,11 +703,13 @@
         }
 
         for (const turn of state.turns) {
-            const userMsg = document.createElement('article');
-            userMsg.className = 'message user';
-            userMsg.innerHTML = `<div class="message-role">You</div><div class="message-text"></div>`;
-            userMsg.querySelector('.message-text').textContent = turn.prompt || '';
-            chatTimeline.appendChild(userMsg);
+            if (!turn.hide_user) {
+                const userMsg = document.createElement('article');
+                userMsg.className = 'message user';
+                userMsg.innerHTML = `<div class="message-role">You</div><div class="message-text"></div>`;
+                userMsg.querySelector('.message-text').textContent = turn.prompt || '';
+                chatTimeline.appendChild(userMsg);
+            }
 
             const assistantMsg = document.createElement('article');
             assistantMsg.className = 'message assistant';
@@ -980,11 +985,71 @@
     });
     btnNewConversation.addEventListener('click', onNewConversation);
 
+    async function seedFollowupFromUrl() {
+        try {
+            const params = new URLSearchParams(window.location.search || '');
+            const followup = params.get('followup');
+            const id = params.get('id');
+            if (!followup || !id) return false;
+            if (followup !== 'chart' && followup !== 'table') return false;
+
+            setError(null);
+            const resp = await postJson('/api/followup/seed', { type: followup, id });
+            const convId = resp && resp.conversation_id;
+            const seeded = resp && resp.turn;
+            if (!convId || !seeded) return false;
+
+            state.followupMode = true;
+            state.conversationId = convId;
+            state.turns = [
+                {
+                    id: seeded.turn_id || null,
+                    prompt: seeded.title ? `Follow-up: ${seeded.title}` : 'Follow-up',
+                    sql: seeded.sql || null,
+                    columns: Array.isArray(seeded.columns) ? seeded.columns : [],
+                    data: Array.isArray(seeded.data) ? seeded.data : [],
+                    total_count: seeded.total_count || null,
+                    chart_intent: seeded.chart_intent || null,
+                    plotly: null,
+                    assistant_text: seeded.assistant_text || '',
+                    response_blocks: Array.isArray(seeded.response_blocks) ? seeded.response_blocks : [],
+                    status: seeded.status || 'success',
+                    error: null,
+                    created_at: seeded.created_at || null,
+                    hide_user: true,
+                    suppress_auto_blocks: true,
+                },
+            ];
+            renderConversation();
+            await loadHistoryList().catch(() => { });
+            renderHistory();
+            if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+            elPrompt && elPrompt.focus && elPrompt.focus();
+
+            // Clean up URL so refresh doesn't reseed.
+            const nextUrl = window.location.pathname;
+            window.history.replaceState({}, document.title, nextUrl);
+            return true;
+        } catch (err) {
+            setError(err && err.message ? err.message : 'Failed to open follow-up');
+            return false;
+        }
+    }
+
     // Initial state.
     setError(null);
-    Promise.all([loadPinnedKeys(), loadPinnedTableKeys()])
-        .then(() => renderConversation())
-        .catch(() => renderConversation());
+    seedFollowupFromUrl()
+        .then((seeded) => {
+            if (seeded) return;
+            return Promise.all([loadPinnedKeys(), loadPinnedTableKeys()])
+                .then(() => renderConversation())
+                .catch(() => renderConversation());
+        })
+        .catch(() => {
+            Promise.all([loadPinnedKeys(), loadPinnedTableKeys()])
+                .then(() => renderConversation())
+                .catch(() => renderConversation());
+        });
     loadHistoryList().catch(() => { });
 })();
 

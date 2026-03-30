@@ -11,6 +11,7 @@ from app.api.routes.pinned_tables import router as pinned_tables_router
 from app.api.routes.table_data import router as table_data_router
 from app.api.routes.upload import router as upload_router
 from app.api.routes.export import router as export_router
+from app.api.routes.followup import router as followup_router
 from app.db.engine import engine
 from app.repositories.charts_repo import init_charts_table
 from app.repositories.history_repo import init_history_tables
@@ -42,6 +43,7 @@ def create_app() -> FastAPI:
     app.include_router(table_data_router)
     app.include_router(upload_router)
     app.include_router(export_router)
+    app.include_router(followup_router)
 
     return app
 
