@@ -10,7 +10,7 @@ def init_charts_table(engine: Engine) -> None:
         conn.execute(
             text(
                 """
-                CREATE TABLE IF NOT EXISTS charts (
+                CREATE TABLE IF NOT EXISTS pinned_charts (
                     id UUID PRIMARY KEY,
                     title TEXT NOT NULL,
                     sql_query TEXT NOT NULL,
@@ -26,10 +26,10 @@ def init_charts_table(engine: Engine) -> None:
                 """
             )
         )
-        conn.execute(text("ALTER TABLE charts ADD COLUMN IF NOT EXISTS sort_order INT NOT NULL DEFAULT 0"))
-        conn.execute(text("ALTER TABLE charts ADD COLUMN IF NOT EXISTS width_units INT NOT NULL DEFAULT 1"))
-        conn.execute(text("ALTER TABLE charts ADD COLUMN IF NOT EXISTS height_px INT NOT NULL DEFAULT 320"))
-        conn.execute(text("ALTER TABLE charts ADD COLUMN IF NOT EXISTS series_field TEXT"))
+        conn.execute(text("ALTER TABLE pinned_charts ADD COLUMN IF NOT EXISTS sort_order INT NOT NULL DEFAULT 0"))
+        conn.execute(text("ALTER TABLE pinned_charts ADD COLUMN IF NOT EXISTS width_units INT NOT NULL DEFAULT 1"))
+        conn.execute(text("ALTER TABLE pinned_charts ADD COLUMN IF NOT EXISTS height_px INT NOT NULL DEFAULT 320"))
+        conn.execute(text("ALTER TABLE pinned_charts ADD COLUMN IF NOT EXISTS series_field TEXT"))
 
 
 def pin_chart(
@@ -46,12 +46,12 @@ def pin_chart(
 
     chart_id = str(uuid.uuid4())
     with engine.begin() as conn:
-        max_order = conn.execute(text("SELECT COALESCE(MAX(sort_order), -1) FROM charts")).scalar()
+        max_order = conn.execute(text("SELECT COALESCE(MAX(sort_order), -1) FROM pinned_charts")).scalar()
         next_order = int(max_order) + 1
         row = conn.execute(
             text(
                 """
-                INSERT INTO charts (id, title, sql_query, chart_type, x_field, y_field, series_field, sort_order, width_units, height_px)
+                INSERT INTO pinned_charts (id, title, sql_query, chart_type, x_field, y_field, series_field, sort_order, width_units, height_px)
                 VALUES (CAST(:id AS UUID), :title, :sql_query, :chart_type, :x_field, :y_field, :series_field, :sort_order, 1, 320)
                 RETURNING id::text AS id, title, sql_query, chart_type, x_field, y_field, series_field, sort_order, width_units, height_px, created_at
                 """
@@ -76,7 +76,7 @@ def list_pinned_charts(engine: Engine) -> List[Dict[str, Any]]:
             text(
                 """
                 SELECT id::text AS id, title, sql_query, chart_type, x_field, y_field, series_field, sort_order, width_units, height_px, created_at
-                FROM charts
+                FROM pinned_charts
                 ORDER BY sort_order ASC, created_at ASC
                 """
             )
@@ -90,7 +90,7 @@ def get_pinned_chart(engine: Engine, chart_id: str) -> Optional[Dict[str, Any]]:
             text(
                 """
                 SELECT id::text AS id, title, sql_query, chart_type, x_field, y_field, series_field, sort_order, width_units, height_px, created_at
-                FROM charts
+                FROM pinned_charts
                 WHERE id = CAST(:id AS UUID)
                 """
             ),
@@ -102,7 +102,7 @@ def get_pinned_chart(engine: Engine, chart_id: str) -> Optional[Dict[str, Any]]:
 def delete_pinned_chart(engine: Engine, chart_id: str) -> bool:
     with engine.begin() as conn:
         deleted = conn.execute(
-            text("DELETE FROM charts WHERE id = CAST(:id AS UUID)"),
+            text("DELETE FROM pinned_charts WHERE id = CAST(:id AS UUID)"),
             {"id": chart_id},
         )
     return bool((deleted.rowcount or 0) > 0)
@@ -136,7 +136,7 @@ def update_pinned_chart_layout(
         row = conn.execute(
             text(
                 f"""
-                UPDATE charts
+                UPDATE pinned_charts
                 SET {", ".join(updates)}
                 WHERE id = CAST(:id AS UUID)
                 RETURNING id::text AS id, title, sql_query, chart_type, x_field, y_field, sort_order, width_units, height_px, created_at

@@ -13,10 +13,10 @@ Output:
 {
   "make_chart": true|false,
   "chart_type": "{{ chart_type_union }}",
-  "x": "<column or empty>",
-  "y": "<column or empty>",
-  "series": "<column or empty>",
-  "title": "<short title or empty>"
+  "x": "<column|null>",
+  "y": "<column|null>",
+  "series": "<column|null>",
+  "title": "<short title|null>"
 }
 
 Rules:
@@ -24,5 +24,7 @@ Rules:
 - No data guessing
 - If unclear → make_chart=false
 - x = dimension, y = numeric, series = optional
-- time → line, series → grouped_bar, else → bar, pie only for part-of-whole
+- If chart_type is unclear: time → line, series → grouped_bar, else → bar
+- pie only for part-of-whole
+- Prefer null or omit keys when value is unknown
 

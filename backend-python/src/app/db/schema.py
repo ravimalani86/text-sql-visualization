@@ -4,7 +4,7 @@ from sqlalchemy import inspect
 from sqlalchemy.engine import Engine
 
 
-EXCLUDED_TABLES = {"charts", "conversations", "conversation_turns"}
+EXCLUDED_TABLES = {"pinned_tables", "pinned_charts", "conversations", "conversation_turns"}
 
 
 def get_db_schema(engine: Engine) -> dict:

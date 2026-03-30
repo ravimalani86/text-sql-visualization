@@ -244,6 +244,49 @@ body {
   margin-top: 10px;
 }
 
+.message-status {
+  margin: 10px 0 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #5d637f;
+  font-size: 0.92rem;
+}
+
+.message-status.is-streaming {
+  color: #4f4f7d;
+}
+
+.message-status-text {
+  line-height: 1.45;
+}
+
+.message-status-dots {
+  display: inline-block;
+  min-width: 16px;
+  overflow: hidden;
+}
+
+.message-status-dots::after {
+  content: "";
+  animation: dots 1.5s steps(3, end) infinite;
+}
+
+@keyframes dots {
+  0% {
+    content: "";
+  }
+  33% {
+    content: ".";
+  }
+  66% {
+    content: "..";
+  }
+  100% {
+    content: "...";
+  }
+}
+
 .composer {
   border: 1px solid var(--border);
   background: rgba(255, 255, 255, 0.68);
@@ -251,7 +294,7 @@ body {
   position: sticky;
   bottom: 0;
   z-index: 5;
-  border-radius: 999px;
+  border-radius: 8px;
 }
 
 .composer-actions {
@@ -266,9 +309,15 @@ body {
   gap: 10px;
   border: 1px solid rgba(0, 0, 0, 0.06);
   background: rgba(255, 255, 255, 0.92);
-  border-radius: 999px;
+  border-radius: 8px;
   padding: 8px 10px;
   box-shadow: 0 10px 26px rgba(0, 0, 0, 0.08);
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.composer-bar:focus-within {
+  border-color: rgba(99, 102, 241, 0.45);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.14), 0 10px 26px rgba(0, 0, 0, 0.08);
 }
 
 .composer-input {
@@ -283,6 +332,10 @@ body {
   padding: 6px 2px;
   resize: none;
   overflow: auto;
+}
+
+.composer-input::placeholder {
+  color: #7a7a95;
 }
 
 .composer-right {

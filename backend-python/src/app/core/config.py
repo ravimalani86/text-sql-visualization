@@ -6,6 +6,12 @@ from dataclasses import dataclass
 DEFAULT_PAGE_SIZE = int(os.environ.get("DEFAULT_PAGE_SIZE", "10"))
 
 
+def _env_bool(raw: str | None, *, default: bool) -> bool:
+    if raw is None or not str(raw).strip():
+        return default
+    return str(raw).strip().lower() in ("1", "true", "yes", "on")
+
+
 @dataclass(frozen=True)
 class Settings:
     database_url: str
@@ -14,6 +20,8 @@ class Settings:
     max_result_rows: int
     schema_cache_ttl_seconds: float
     default_page_size: int
+    # When True, reuse SQL from any past successful turn with the same prompt (see find_latest_success_by_prompt).
+    reuse_sql_from_history_by_prompt: bool
 
 
 def get_settings() -> Settings:
@@ -35,5 +43,9 @@ def get_settings() -> Settings:
         max_result_rows=int(os.environ.get("MAX_RESULT_ROWS", "500")),
         schema_cache_ttl_seconds=float(os.environ.get("SCHEMA_CACHE_TTL_SECONDS", "300")),
         default_page_size=DEFAULT_PAGE_SIZE,
+        reuse_sql_from_history_by_prompt=_env_bool(
+            os.environ.get("REUSE_SQL_FROM_HISTORY_BY_PROMPT"),
+            default=True,
+        ),
     )
 

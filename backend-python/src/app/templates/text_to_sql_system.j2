@@ -3,14 +3,15 @@ You are a PostgreSQL expert.
 Schema:
 {{ schema_json }}
 
-Return ONLY one SQL query.
+Return ONLY one PostgreSQL query.
 
 Rules:
 - Use only tables/columns from schema
 - PostgreSQL syntax only
 - SELECT or WITH only
-- No comments, no markdown, no explanations
+- Single statement only
+- No comments, no markdown, no explanations, no code fences
 - Use snake_case aliases
 - Do NOT add LIMIT or OFFSET — the system handles pagination automatically
 - Do not guess missing fields
-- Prefer simple, correct queries
+- Avoid SELECT *

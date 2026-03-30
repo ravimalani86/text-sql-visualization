@@ -137,13 +137,17 @@ def _analyze_core(
                 "created_at": datetime.utcnow().isoformat(),
             }
 
-        prompt_cache_turn = find_latest_success_by_prompt(engine, user_prompt)
-        prompt_cache_hit = bool(
-            prompt_cache_turn
-            and prompt_cache_turn.get("sql")
-            and isinstance(prompt_cache_turn.get("columns"), list)
-            and isinstance(prompt_cache_turn.get("data"), list)
-        )
+        if settings.reuse_sql_from_history_by_prompt:
+            prompt_cache_turn = find_latest_success_by_prompt(engine, user_prompt)
+            prompt_cache_hit = bool(
+                prompt_cache_turn
+                and prompt_cache_turn.get("sql")
+                and isinstance(prompt_cache_turn.get("columns"), list)
+                and isinstance(prompt_cache_turn.get("data"), list)
+            )
+        else:
+            prompt_cache_turn = None
+            prompt_cache_hit = False
         can_reuse_last_result = bool(
             latest_turn
             and latest_turn.get("sql")
@@ -229,13 +233,14 @@ def _analyze_core(
             if prompt_cache_hit:
                 response_source = "history_cache"
                 sql = str(prompt_cache_turn.get("sql") or "")
-                out_columns = prompt_cache_turn.get("columns") or []
-                out_rows = prompt_cache_turn.get("data") or []
-                total_count = prompt_cache_turn.get("total_count") or len(out_rows)
+                sql = normalize_and_validate_sql(sql)
+                emit({"type": "stage", "name": "prompt_cache_hit", "sql": sql})
+                total_count = execute_count(engine=engine, base_sql=sql)
+                out_columns, out_rows = execute_sql(engine=engine, sql=sql, max_rows=settings.max_result_rows)
                 emit(
                     {
                         "type": "stage",
-                        "name": "prompt_cache_hit",
+                        "name": "query_executed",
                         "sql": sql,
                         "columns": out_columns,
                         "row_count": len(out_rows),
