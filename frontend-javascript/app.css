@@ -522,6 +522,61 @@ body {
   padding: 4px 2px;
 }
 
+.table-export {
+  position: relative;
+}
+
+.table-export summary {
+  list-style: none;
+  cursor: pointer;
+  border: 1px solid rgba(90, 59, 189, 0.24);
+  background: #efeaff;
+  color: #442b93;
+  border-radius: 6px;
+  padding: 7px 10px;
+  font-size: 12px;
+  user-select: none;
+}
+
+.table-export summary::-webkit-details-marker {
+  display: none;
+}
+
+.table-export-body {
+  position: absolute;
+  right: 0;
+  margin-top: 6px;
+  min-width: 180px;
+  border: 1px solid rgba(0, 0, 0, 0.12);
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+  padding: 8px;
+  z-index: 3;
+  display: grid;
+  gap: 6px;
+}
+
+.table-export-item {
+  width: 100%;
+  text-align: left;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.96);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.table-export-item:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.table-export-item:hover:not(:disabled) {
+  border-color: rgba(99, 102, 241, 0.45);
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;

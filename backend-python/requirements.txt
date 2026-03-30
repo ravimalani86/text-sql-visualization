@@ -6,3 +6,5 @@ pandas
 python-multipart
 openai>=1.40.0
 jinja2
+openpyxl
+reportlab

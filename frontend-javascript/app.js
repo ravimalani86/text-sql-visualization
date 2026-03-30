@@ -300,6 +300,62 @@
         colToggle.appendChild(colToggleBody);
         controls.appendChild(colToggle);
 
+        const exportMenu = document.createElement('details');
+        exportMenu.className = 'table-export';
+        const exportSummary = document.createElement('summary');
+        exportSummary.textContent = 'Export';
+        exportMenu.appendChild(exportSummary);
+        const exportBody = document.createElement('div');
+        exportBody.className = 'table-export-body';
+        exportMenu.appendChild(exportBody);
+
+        const downloadExport = async (fmt) => {
+            if (!turnId) {
+                setError('Export is not available until the result is saved.');
+                return;
+            }
+            try {
+                exportSummary.textContent = 'Exporting…';
+                const url = `${API}/api/export?turn_id=${encodeURIComponent(turnId)}&format=${encodeURIComponent(fmt)}`;
+                const res = await fetch(url);
+                if (!res.ok) {
+                    const txt = await res.text().catch(() => '');
+                    throw new Error(txt || `Export failed: ${res.status}`);
+                }
+                const blob = await res.blob();
+                const cd = res.headers.get('content-disposition') || '';
+                const match = cd.match(/filename="([^"]+)"/i);
+                const filename = (match && match[1]) || `export.${fmt}`;
+                const objectUrl = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = objectUrl;
+                a.download = filename;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+                URL.revokeObjectURL(objectUrl);
+                exportMenu.open = false;
+            } catch (err) {
+                setError(err && err.message ? err.message : 'Export failed');
+            } finally {
+                exportSummary.textContent = 'Export';
+            }
+        };
+
+        const makeExportItem = (label, fmt) => {
+            const b = document.createElement('button');
+            b.type = 'button';
+            b.className = 'table-export-item';
+            b.textContent = label;
+            b.disabled = !turnId;
+            b.addEventListener('click', () => downloadExport(fmt));
+            return b;
+        };
+        exportBody.appendChild(makeExportItem('CSV', 'csv'));
+        exportBody.appendChild(makeExportItem('Excel (.xlsx)', 'xlsx'));
+        exportBody.appendChild(makeExportItem('PDF', 'pdf'));
+        controls.appendChild(exportMenu);
+
         const table = document.createElement('table');
         table.className = 'table';
         const thead = document.createElement('thead');
