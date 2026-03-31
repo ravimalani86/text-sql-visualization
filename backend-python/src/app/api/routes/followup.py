@@ -11,8 +11,6 @@ from app.db.engine import engine
 from app.repositories.charts_repo import get_pinned_chart
 from app.repositories.history_repo import create_conversation, save_turn
 from app.repositories.pinned_tables_repo import get_pinned_table
-from app.services.plotly_mapper import build_plotly_figure
-from app.services.response_builder import build_response_blocks
 from app.services.sql_runtime import execute_count, execute_sql, normalize_and_validate_sql
 
 router = APIRouter(tags=["followup"])
@@ -56,7 +54,8 @@ async def seed_followup(payload: FollowupSeedRequest) -> Dict[str, Any]:
             chart_intent["y"] = chart.get("y_field")
         if chart.get("series_field") in out_columns:
             chart_intent["series"] = chart.get("series_field")
-        plotly = build_plotly_figure(intent=chart_intent, columns=out_columns, rows=out_rows) if out_rows else None
+        # Keep plotly out of the seeded follow-up turn to avoid UI auto-rendering charts.
+        plotly = None
 
     else:
         tbl = get_pinned_table(engine, item_id)
@@ -70,7 +69,7 @@ async def seed_followup(payload: FollowupSeedRequest) -> Dict[str, Any]:
         plotly = None
 
     # Follow-up UI should render only a lightweight banner message.
-    # We still save SQL/data/plotly on the turn so the next user prompt has context.
+    # We still save SQL/data on the turn so the next user prompt has context.
     seed_prompt = f"Follow up on pinned {item_type}"
     label = "chart" if item_type == "chart" else "table"
     response_blocks = [
@@ -90,7 +89,7 @@ async def seed_followup(payload: FollowupSeedRequest) -> Dict[str, Any]:
         columns=out_columns,
         data=out_rows,
         chart_intent=chart_intent,
-        plotly=plotly,
+        plotly=None,
         assistant_text=None,
         response_blocks=response_blocks,
         status="success",
@@ -108,7 +107,7 @@ async def seed_followup(payload: FollowupSeedRequest) -> Dict[str, Any]:
             "data": out_rows[: payload.page_size],
             "total_count": total_count,
             "chart_intent": chart_intent,
-            "plotly": plotly,
+            "plotly": None,
             "assistant_text": None,
             "response_blocks": response_blocks,
             "status": "success",

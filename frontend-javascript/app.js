@@ -88,7 +88,6 @@
         turns: [],
         pinnedKeys: new Set(),
         pinnedTableKeys: new Set(),
-        followupMode: false,
     };
 
     function setError(msg) {
@@ -232,8 +231,7 @@
 
         for (const conv of state.conversations) {
             const item = document.createElement('button');
-            const isActive = !state.followupMode && conv.id === state.conversationId;
-            item.className = `history-item${isActive ? ' active' : ''}`;
+            item.className = `history-item${conv.id === state.conversationId ? ' active' : ''}`;
             item.type = 'button';
             item.dataset.id = conv.id;
 
@@ -703,7 +701,14 @@
         }
 
         for (const turn of state.turns) {
-            if (!turn.hide_user) {
+            const blocks = Array.isArray(turn.response_blocks) ? turn.response_blocks : [];
+            const isFollowupBanner =
+                blocks.length === 1
+                && blocks[0]
+                && blocks[0].type === 'text'
+                && typeof blocks[0].content === 'string'
+                && blocks[0].content.startsWith('↩ Follow-up started');
+            if (!(turn.hide_user || isFollowupBanner)) {
                 const userMsg = document.createElement('article');
                 userMsg.className = 'message user';
                 userMsg.innerHTML = `<div class="message-role">You</div><div class="message-text"></div>`;
@@ -715,9 +720,9 @@
             assistantMsg.className = 'message assistant';
             assistantMsg.innerHTML = `<div class="message-role">NIA</div><div class="message-body"></div>`;
             const body = assistantMsg.querySelector('.message-body');
-            const blocks = normalizeBlocks(turn);
+            const normBlocks = normalizeBlocks(turn);
 
-            for (const block of blocks) {
+            for (const block of normBlocks) {
                 if (block.type === 'text') {
                     const p = document.createElement('p');
                     p.className = 'message-text';
@@ -996,39 +1001,13 @@
             setError(null);
             const resp = await postJson('/api/followup/seed', { type: followup, id });
             const convId = resp && resp.conversation_id;
-            const seeded = resp && resp.turn;
-            if (!convId || !seeded) return false;
+            if (!convId) return false;
 
-            state.followupMode = true;
-            state.conversationId = convId;
-            state.turns = [
-                {
-                    id: seeded.turn_id || null,
-                    prompt: seeded.title ? `Follow-up: ${seeded.title}` : 'Follow-up',
-                    sql: seeded.sql || null,
-                    columns: Array.isArray(seeded.columns) ? seeded.columns : [],
-                    data: Array.isArray(seeded.data) ? seeded.data : [],
-                    total_count: seeded.total_count || null,
-                    chart_intent: seeded.chart_intent || null,
-                    plotly: null,
-                    assistant_text: seeded.assistant_text || '',
-                    response_blocks: Array.isArray(seeded.response_blocks) ? seeded.response_blocks : [],
-                    status: seeded.status || 'success',
-                    error: null,
-                    created_at: seeded.created_at || null,
-                    hide_user: true,
-                    suppress_auto_blocks: true,
-                },
-            ];
-            renderConversation();
-            await loadHistoryList().catch(() => { });
-            renderHistory();
-            if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
-            elPrompt && elPrompt.focus && elPrompt.focus();
-
-            // Clean up URL so refresh doesn't reseed.
-            const nextUrl = window.location.pathname;
+            const nextUrl = `${window.location.pathname}?conversation_id=${encodeURIComponent(convId)}`;
             window.history.replaceState({}, document.title, nextUrl);
+            await loadConversation(convId);
+            await loadHistoryList().catch(() => { });
+            elPrompt && elPrompt.focus && elPrompt.focus();
             return true;
         } catch (err) {
             setError(err && err.message ? err.message : 'Failed to open follow-up');
@@ -1036,11 +1015,23 @@
         }
     }
 
+    async function loadConversationFromUrlIfPresent() {
+        const params = new URLSearchParams(window.location.search || '');
+        const convId = params.get('conversation_id');
+        if (!convId) return false;
+        await loadConversation(convId);
+        return true;
+    }
+
     // Initial state.
     setError(null);
-    seedFollowupFromUrl()
-        .then((seeded) => {
-            if (seeded) return;
+    loadConversationFromUrlIfPresent()
+        .then((loaded) => {
+            if (loaded) return true;
+            return seedFollowupFromUrl();
+        })
+        .then((handled) => {
+            if (handled) return;
             return Promise.all([loadPinnedKeys(), loadPinnedTableKeys()])
                 .then(() => renderConversation())
                 .catch(() => renderConversation());

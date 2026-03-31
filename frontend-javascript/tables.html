@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tables Browser</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="stylesheet" href="./tables.css" />
+  </head>
+  <body>
+    <main class="tables-page">
+      <header class="topbar">
+        <div>
+          <h1 class="title">Tables Browser</h1>
+          <p class="subtitle">Select a table, view all rows, and delete records.</p>
+        </div>
+        <div class="topbar-actions">
+          <a href="./index.html" class="button button-secondary nav-link">Back to Chat</a>
+          <a href="./dashboard.html" class="button button-secondary nav-link">Dashboard</a>
+        </div>
+      </header>
+
+      <section class="toolbar">
+        <label for="tableSelect" class="toolbar-label">Table</label>
+        <select id="tableSelect" class="table-select"></select>
+        <button id="btnReload" class="button" type="button">Reload</button>
+        <button id="btnDeleteTable" class="button button-danger" type="button">Delete Table</button>
+      </section>
+
+      <div id="pageError" class="error hidden"></div>
+      <div id="recordsInfo" class="records-info muted"></div>
+
+      <section id="recordsWrap" class="records-wrap">
+        <table id="recordsTable" class="records-table"></table>
+      </section>
+    </main>
+
+    <script src="./tables.js"></script>
+  </body>
+</html>
