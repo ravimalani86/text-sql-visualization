@@ -247,7 +247,9 @@ def build_plotly_figure(
         if not pairs:
             return None
         labels2, values2 = zip(*pairs)
-        pie_layout = {**layout, "xaxis": None, "yaxis": None}
+        # Pie traces do not use cartesian axes; keeping xaxis/yaxis as null
+        # can break rendering in some Plotly wrapper setups.
+        pie_layout = {k: v for k, v in layout.items() if k not in ("xaxis", "yaxis")}
         return {
             "data": [
                 {

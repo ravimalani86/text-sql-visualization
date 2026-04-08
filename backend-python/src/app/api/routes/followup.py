@@ -8,9 +8,9 @@ from pydantic import BaseModel, Field
 
 from app.core.config import DEFAULT_PAGE_SIZE, get_settings
 from app.db.engine import engine
-from app.repositories.charts_repo import get_pinned_chart
+from app.repositories.charts_repo import get_chart
 from app.repositories.history_repo import create_conversation, save_turn
-from app.repositories.pinned_tables_repo import get_pinned_table
+from app.repositories.tables_repo import get_table
 from app.services.sql_runtime import execute_count, execute_sql, normalize_and_validate_sql
 
 router = APIRouter(tags=["followup"])
@@ -39,7 +39,7 @@ async def seed_followup(payload: FollowupSeedRequest) -> Dict[str, Any]:
     plotly: Optional[dict[str, Any]] = None
 
     if item_type == "chart":
-        chart = get_pinned_chart(engine, item_id)
+        chart = get_chart(engine, item_id)
         if not chart:
             raise HTTPException(status_code=404, detail="Pinned chart not found")
         title = (chart.get("title") or "").strip() or "Pinned chart"
@@ -58,7 +58,7 @@ async def seed_followup(payload: FollowupSeedRequest) -> Dict[str, Any]:
         plotly = None
 
     else:
-        tbl = get_pinned_table(engine, item_id)
+        tbl = get_table(engine, item_id)
         if not tbl:
             raise HTTPException(status_code=404, detail="Pinned table not found")
         title = (tbl.get("title") or "").strip() or "Pinned table"

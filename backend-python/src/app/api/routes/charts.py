@@ -7,12 +7,11 @@ from fastapi import APIRouter, HTTPException
 from app.core.config import get_settings
 from app.db.engine import engine
 from app.repositories.charts_repo import (
-    delete_pinned_chart,
-    get_pinned_chart,
-    init_charts_table,
-    list_pinned_charts,
+    delete_chart,
+    get_chart,
+    list_charts,
     pin_chart,
-    update_pinned_chart_layout,
+    update_chart_layout,
 )
 from app.schemas.charts import ChartLayoutRequest, ChartPinRequest
 from app.services.chart_intent_ai import suggest_chart_intent
@@ -25,7 +24,7 @@ router = APIRouter(tags=["charts"])
 
 @router.get("/api/charts")
 async def api_list_charts() -> Dict[str, Any]:
-    return {"items": list_pinned_charts(engine)}
+    return {"items": list_charts(engine)}
 
 
 @router.post("/api/charts/pin")
@@ -49,7 +48,7 @@ async def api_pin_chart(payload: ChartPinRequest) -> Dict[str, Any]:
 @router.post("/api/charts/{chart_id}/refresh")
 async def api_refresh_chart(chart_id: str) -> Dict[str, Any]:
     settings = get_settings()
-    chart = get_pinned_chart(engine, chart_id)
+    chart = get_chart(engine, chart_id)
     if not chart:
         raise HTTPException(status_code=404, detail="Chart not found")
 
@@ -94,7 +93,7 @@ async def api_refresh_chart(chart_id: str) -> Dict[str, Any]:
 
 @router.delete("/api/charts/{chart_id}")
 async def api_delete_chart(chart_id: str) -> Dict[str, Any]:
-    deleted = delete_pinned_chart(engine, chart_id)
+    deleted = delete_chart(engine, chart_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Chart not found")
     return {"status": "ok", "id": chart_id}
@@ -102,7 +101,7 @@ async def api_delete_chart(chart_id: str) -> Dict[str, Any]:
 
 @router.patch("/api/charts/{chart_id}/layout")
 async def api_update_chart_layout(chart_id: str, payload: ChartLayoutRequest) -> Dict[str, Any]:
-    updated = update_pinned_chart_layout(
+    updated = update_chart_layout(
         engine,
         chart_id=chart_id,
         sort_order=payload.sort_order,

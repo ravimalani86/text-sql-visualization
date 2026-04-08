@@ -18,6 +18,7 @@ class Settings:
     openai_api_key: str
     cors_allow_origins: list[str]
     max_result_rows: int
+    max_turns_in_conversation: int
     schema_cache_ttl_seconds: float
     default_page_size: int
     # When True, reuse SQL from any past successful turn with the same prompt (see find_latest_success_by_prompt).
@@ -41,6 +42,7 @@ def get_settings() -> Settings:
         openai_api_key=openai_api_key,
         cors_allow_origins=cors_allow_origins,
         max_result_rows=int(os.environ.get("MAX_RESULT_ROWS", "500")),
+        max_turns_in_conversation=int(os.environ.get("MAX_TURNS_IN_CONVERSATION", "2")),
         schema_cache_ttl_seconds=float(os.environ.get("SCHEMA_CACHE_TTL_SECONDS", "300")),
         default_page_size=DEFAULT_PAGE_SIZE,
         reuse_sql_from_history_by_prompt=_env_bool(

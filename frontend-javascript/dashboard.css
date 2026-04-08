@@ -230,7 +230,6 @@ plotly-chart {
   border: 1px solid var(--border);
   background: var(--card-bg);
   padding: 10px;
-  border-radius: 6px;
   overflow: hidden !important;
   display: flex;
   flex-direction: column;

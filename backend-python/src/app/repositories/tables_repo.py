@@ -5,70 +5,63 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy import Engine
 
 from app.repositories.pinned_dashboard_repo import (
-    ITEM_TYPE_CHART,
+    ITEM_TYPE_TABLE,
     delete_dashboard_item,
     get_dashboard_item,
     init_pinned_dashboard_table,
     list_dashboard_items,
-    pin_dashboard_chart,
+    pin_dashboard_table,
     update_dashboard_item_layout,
 )
 
 
-def init_charts(engine: Engine) -> None:
+def init_tables(engine: Engine) -> None:
     init_pinned_dashboard_table(engine)
 
 
-def pin_chart(
+def pin_table(
     engine: Engine,
     *,
     title: str,
     sql_query: str,
-    chart_type: str,
-    x_field: Optional[str],
-    y_field: Optional[str],
-    series_field: Optional[str] = None,
+    columns: List[str] | None = None,
 ) -> Dict[str, Any]:
-    return pin_dashboard_chart(
+    return pin_dashboard_table(
         engine,
         title=title,
         sql_query=sql_query,
-        chart_type=chart_type,
-        x_field=x_field,
-        y_field=y_field,
-        series_field=series_field,
+        columns=columns,
     )
 
 
-def list_charts(engine: Engine) -> List[Dict[str, Any]]:
-    return list_dashboard_items(engine, ITEM_TYPE_CHART)
+def list_tables(engine: Engine) -> List[Dict[str, Any]]:
+    return list_dashboard_items(engine, ITEM_TYPE_TABLE)
 
 
-def get_chart(engine: Engine, chart_id: str) -> Optional[Dict[str, Any]]:
-    return get_dashboard_item(engine, chart_id, ITEM_TYPE_CHART)
+def get_table(engine: Engine, table_id: str) -> Optional[Dict[str, Any]]:
+    return get_dashboard_item(engine, table_id, ITEM_TYPE_TABLE)
 
 
-def delete_chart(engine: Engine, chart_id: str) -> bool:
-    return delete_dashboard_item(engine, chart_id, ITEM_TYPE_CHART)
+def delete_table(engine: Engine, table_id: str) -> bool:
+    return delete_dashboard_item(engine, table_id, ITEM_TYPE_TABLE)
 
 
-def update_chart_layout(
+def update_table_layout(
     engine: Engine,
     *,
-    chart_id: str,
+    table_id: str,
     sort_order: Optional[int] = None,
     width_units: Optional[int] = None,
     height_px: Optional[int] = None,
 ) -> Optional[Dict[str, Any]]:
     return update_dashboard_item_layout(
         engine,
-        item_id=chart_id,
-        item_type=ITEM_TYPE_CHART,
+        item_id=table_id,
+        item_type=ITEM_TYPE_TABLE,
         sort_order=sort_order,
         width_units=width_units,
         height_px=height_px,
         width_min=1,
         width_max=12,
-        height_max=1000,
+        height_max=1200,
     )
-

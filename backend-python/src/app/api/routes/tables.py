@@ -7,12 +7,12 @@ from pydantic import BaseModel, Field
 
 from app.core.config import DEFAULT_PAGE_SIZE
 from app.db.engine import engine
-from app.repositories.pinned_tables_repo import (
-    delete_pinned_table,
-    get_pinned_table,
-    list_pinned_tables,
+from app.repositories.tables_repo import (
+    delete_table,
+    get_table,
+    list_tables,
     pin_table,
-    update_pinned_table_layout,
+    update_table_layout,
 )
 from app.schemas.tables import TableLayoutRequest, TablePinRequest
 from app.services.sql_runtime import (
@@ -22,7 +22,7 @@ from app.services.sql_runtime import (
     normalize_and_validate_sql,
 )
 
-router = APIRouter(tags=["pinned-tables"])
+router = APIRouter(tags=["tables"])
 
 
 class FilterItem(BaseModel):
@@ -31,7 +31,7 @@ class FilterItem(BaseModel):
     value: Any = None
 
 
-class PinnedTableDataRequest(BaseModel):
+class TableDataRequest(BaseModel):
     page: int = Field(default=1, ge=1)
     page_size: int = Field(default=DEFAULT_PAGE_SIZE, ge=1, le=500)
     sort_column: Optional[str] = None
@@ -42,7 +42,7 @@ class PinnedTableDataRequest(BaseModel):
 
 @router.get("/api/tables")
 async def api_list_tables() -> Dict[str, Any]:
-    return {"items": list_pinned_tables(engine)}
+    return {"items": list_tables(engine)}
 
 
 @router.post("/api/tables/pin")
@@ -61,7 +61,7 @@ async def api_pin_table(payload: TablePinRequest) -> Dict[str, Any]:
 
 @router.post("/api/tables/{table_id}/refresh")
 async def api_refresh_table(table_id: str) -> Dict[str, Any]:
-    item = get_pinned_table(engine, table_id)
+    item = get_table(engine, table_id)
     if not item:
         raise HTTPException(status_code=404, detail="Pinned table not found")
 
@@ -96,8 +96,8 @@ async def api_refresh_table(table_id: str) -> Dict[str, Any]:
 
 
 @router.post("/api/tables/{table_id}/data")
-async def api_table_data(table_id: str, req: PinnedTableDataRequest) -> Dict[str, Any]:
-    item = get_pinned_table(engine, table_id)
+async def api_table_data(table_id: str, req: TableDataRequest) -> Dict[str, Any]:
+    item = get_table(engine, table_id)
     if not item:
         raise HTTPException(status_code=404, detail="Pinned table not found")
 
@@ -145,7 +145,7 @@ async def api_table_data(table_id: str, req: PinnedTableDataRequest) -> Dict[str
 
 @router.delete("/api/tables/{table_id}")
 async def api_delete_table(table_id: str) -> Dict[str, Any]:
-    deleted = delete_pinned_table(engine, table_id)
+    deleted = delete_table(engine, table_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Pinned table not found")
     return {"status": "ok", "id": table_id}
@@ -153,7 +153,7 @@ async def api_delete_table(table_id: str) -> Dict[str, Any]:
 
 @router.patch("/api/tables/{table_id}/layout")
 async def api_update_table_layout(table_id: str, payload: TableLayoutRequest) -> Dict[str, Any]:
-    updated = update_pinned_table_layout(
+    updated = update_table_layout(
         engine,
         table_id=table_id,
         sort_order=payload.sort_order,

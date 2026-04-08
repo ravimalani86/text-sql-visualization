@@ -80,7 +80,7 @@ def _analyze_core(
     )
     emit({"type": "meta", "conversation_id": conversation_id})
 
-    latest_turns = get_latest_success_turns(engine, conversation_id, limit=5)
+    latest_turns = get_latest_success_turns(engine, conversation_id, limit=settings.max_turns_in_conversation)
     latest_turn = latest_turns[0] if latest_turns else None
     effective_prompt = build_effective_prompt(user_prompt, latest_turns)
 

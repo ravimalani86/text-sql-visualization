@@ -836,12 +836,15 @@
                     turn.response_blocks.push(block);
                 }
             };
+            const withoutStatusBlocks = (blocks) => (
+                Array.isArray(blocks) ? blocks.filter((b) => !(b && b.type === 'status')) : []
+            );
             const stageLabelByName = {
                 intent_classified: 'Thinking',
                 reused_previous_result: 'Using previous query result',
                 prompt_cache_hit: 'Reusing saved SQL; refreshing results from database',
                 sql_generated: 'SQL generated. Running query',
-                query_executed: 'Query complete. Preparing table',
+                query_executed: 'Query complete. Table ready',
                 chart_intent_ready: 'Analyzing chart intent',
                 chart_intent_reused: 'Using previous chart intent',
                 chart_reused: 'Using existing chart',
@@ -928,7 +931,7 @@
                     const hasFinalBlocks = Array.isArray(finalTurn.response_blocks) && finalTurn.response_blocks.length > 0;
                     Object.assign(turn, finalTurn);
                     if (!hasFinalBlocks && prevBlocks.length) {
-                        turn.response_blocks = prevBlocks;
+                        turn.response_blocks = withoutStatusBlocks(prevBlocks);
                     }
                     if (!turn.sql && prevSql) {
                         turn.sql = prevSql;
@@ -951,11 +954,17 @@
                     if (!turn.assistant_text && prevAssistantText) {
                         turn.assistant_text = prevAssistantText;
                     }
+                    if (turn.status !== 'streaming' && Array.isArray(turn.response_blocks)) {
+                        turn.response_blocks = withoutStatusBlocks(turn.response_blocks);
+                    }
                     state.conversationId = evt.data.conversation_id || state.conversationId;
                     renderConversation();
                 } else if (evt.type === 'error') {
                     turn.status = 'failed';
                     turn.error = (evt.detail && String(evt.detail)) || 'Something went wrong';
+                    if (Array.isArray(turn.response_blocks)) {
+                        turn.response_blocks = withoutStatusBlocks(turn.response_blocks);
+                    }
                     if (!turn.response_blocks.length) {
                         turn.response_blocks.push({ type: 'text', content: 'Request failed.' });
                     }
