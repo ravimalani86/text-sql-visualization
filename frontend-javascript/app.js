@@ -718,7 +718,7 @@
 
             const assistantMsg = document.createElement('article');
             assistantMsg.className = 'message assistant';
-            assistantMsg.innerHTML = `<div class="message-role">NIA</div><div class="message-body"></div>`;
+            assistantMsg.innerHTML = `<div class="message-role">AI</div><div class="message-body"></div>`;
             const body = assistantMsg.querySelector('.message-body');
             const normBlocks = normalizeBlocks(turn);
 
@@ -805,10 +805,8 @@
         setLoading(btnAnalyze, true, 'Send', 'Thinking');
 
         try {
-            const fields = { prompt };
-            if (state.conversationId) {
-                fields.conversation_id = state.conversationId;
-            }
+            const payload = { query: prompt };
+            if (state.conversationId) payload.conversation_id = state.conversationId;
 
             const turn = {
                 id: null,
@@ -828,6 +826,7 @@
             state.turns.push(turn);
             renderConversation();
 
+            const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
             const upsertBlock = (type, block) => {
                 const idx = turn.response_blocks.findIndex((b) => b && b.type === type);
                 if (idx >= 0) {
@@ -839,17 +838,15 @@
             const withoutStatusBlocks = (blocks) => (
                 Array.isArray(blocks) ? blocks.filter((b) => !(b && b.type === 'status')) : []
             );
-            const stageLabelByName = {
-                intent_classified: 'Thinking',
-                reused_previous_result: 'Using previous query result',
-                prompt_cache_hit: 'Reusing saved SQL; refreshing results from database',
-                sql_generated: 'SQL generated. Running query',
-                query_executed: 'Query complete. Table ready',
-                chart_intent_ready: 'Analyzing chart intent',
-                chart_intent_reused: 'Using previous chart intent',
-                chart_reused: 'Using existing chart',
-                chart_ready: 'Chart is ready',
-                assistant_ready: 'Preparing final response',
+            const statusLabelByName = {
+                understanding: 'Understanding request',
+                searching: 'Searching relevant schema',
+                planning: 'Planning SQL',
+                generating: 'Generating SQL and results',
+                correcting: 'Correcting SQL',
+                finished: 'Finalizing response',
+                failed: 'Failed',
+                stopped: 'Stopped',
             };
 
             const mapFinalTurn = (data) => ({
@@ -869,56 +866,73 @@
             });
 
             elPrompt.value = '';
-            await postFormStream('/analyze/stream', fields, (evt) => {
-                if (!evt || typeof evt !== 'object') return;
-                if (evt.type === 'meta' && evt.conversation_id) {
-                    state.conversationId = evt.conversation_id;
-                } else if (evt.type === 'stage') {
-                    const stageText = stageLabelByName[evt.name] || `Processing: ${String(evt.name || 'working')}`;
-                    upsertBlock('status', { type: 'status', content: stageText });
-                    if (evt.name === 'sql_generated' && evt.sql) {
-                        turn.sql = evt.sql;
-                        upsertBlock('sql', { type: 'sql', sql: evt.sql });
-                    } else if (evt.name === 'prompt_cache_hit' && evt.sql) {
-                        turn.sql = evt.sql;
-                        upsertBlock('sql', { type: 'sql', sql: evt.sql });
-                    } else if (evt.name === 'query_executed' || evt.name === 'reused_previous_result') {
-                        const cols = Array.isArray(evt.columns) ? evt.columns : [];
-                        const rows = Array.isArray(evt.preview_rows) ? evt.preview_rows : [];
-                        const totalCount = typeof evt.total_count === 'number' ? evt.total_count : (typeof evt.row_count === 'number' ? evt.row_count : rows.length);
-                        if (evt.sql) turn.sql = evt.sql;
-                        turn.columns = cols;
-                        turn.data = rows;
-                        turn.total_count = totalCount;
-                        upsertBlock('table', {
-                            type: 'table',
-                            columns: cols,
-                            rows,
-                            meta: {
-                                total_count: totalCount,
-                                row_count: totalCount,
-                                shown_rows: rows.length,
-                                page: evt.page || 1,
-                                page_size: evt.page_size || DEFAULT_PAGE_SIZE,
-                                total_pages: Math.ceil(totalCount / (evt.page_size || DEFAULT_PAGE_SIZE)),
-                            },
-                        });
-                    } else if (evt.name === 'chart_intent_ready' && evt.chart_intent) {
-                        turn.chart_intent = evt.chart_intent;
-                    } else if (evt.name === 'chart_ready' && evt.plotly) {
-                        turn.plotly = evt.plotly;
-                        upsertBlock('chart', {
-                            type: 'chart',
-                            chart_type: turn.chart_intent && turn.chart_intent.chart_type,
-                            plotly: evt.plotly,
-                        });
-                    } else if (evt.name === 'assistant_ready') {
-                        const text = evt.assistant_text || '';
-                        turn.assistant_text = text;
-                        upsertBlock('status', { type: 'status', content: text || 'Preparing final response...' });
-                    }
-                    renderConversation();
-                } else if (evt.type === 'final' && evt.data) {
+            const askStart = await postJson('/v1/asks', payload);
+            const queryId = askStart && askStart.query_id;
+            if (!queryId) {
+                throw new Error('Unable to start ask job');
+            }
+
+            const startedAt = Date.now();
+            const pollIntervalMs = 700;
+            const maxWaitMs = 3 * 60 * 1000;
+
+            while (true) {
+                const result = await getJson(`/v1/asks/${encodeURIComponent(queryId)}/result`);
+                if (!result || typeof result !== 'object') {
+                    throw new Error('Invalid ask result');
+                }
+
+                if (result.conversation_id) {
+                    state.conversationId = result.conversation_id;
+                }
+
+                const statusText = statusLabelByName[result.status] || `Processing: ${String(result.stage || result.status || 'working')}`;
+                upsertBlock('status', { type: 'status', content: statusText });
+
+                if (result.sql) {
+                    turn.sql = result.sql;
+                    upsertBlock('sql', { type: 'sql', sql: result.sql });
+                }
+
+                const cols = Array.isArray(result.columns) ? result.columns : [];
+                const rows = Array.isArray(result.preview_rows) ? result.preview_rows : [];
+                if (cols.length) {
+                    const totalCount = typeof result.total_count === 'number' ? result.total_count : rows.length;
+                    turn.columns = cols;
+                    turn.data = rows;
+                    turn.total_count = totalCount;
+                    upsertBlock('table', {
+                        type: 'table',
+                        columns: cols,
+                        rows,
+                        meta: {
+                            total_count: totalCount,
+                            row_count: totalCount,
+                            shown_rows: rows.length,
+                            page: 1,
+                            page_size: DEFAULT_PAGE_SIZE,
+                            total_pages: Math.ceil(totalCount / DEFAULT_PAGE_SIZE),
+                        },
+                    });
+                }
+
+                if (result.chart_intent) {
+                    turn.chart_intent = result.chart_intent;
+                }
+                if (result.plotly) {
+                    turn.plotly = result.plotly;
+                    upsertBlock('chart', {
+                        type: 'chart',
+                        chart_type: turn.chart_intent && turn.chart_intent.chart_type,
+                        plotly: result.plotly,
+                    });
+                }
+                if (result.assistant_text) {
+                    turn.assistant_text = result.assistant_text;
+                }
+                renderConversation();
+
+                if (result.status === 'finished' && result.result) {
                     const prevBlocks = Array.isArray(turn.response_blocks) ? [...turn.response_blocks] : [];
                     const prevColumns = Array.isArray(turn.columns) ? [...turn.columns] : [];
                     const prevRows = Array.isArray(turn.data) ? [...turn.data] : [];
@@ -927,15 +941,13 @@
                     const prevChartIntent = turn.chart_intent;
                     const prevPlotly = turn.plotly;
                     const prevAssistantText = turn.assistant_text;
-                    const finalTurn = mapFinalTurn(evt.data);
+                    const finalTurn = mapFinalTurn(result.result);
                     const hasFinalBlocks = Array.isArray(finalTurn.response_blocks) && finalTurn.response_blocks.length > 0;
                     Object.assign(turn, finalTurn);
                     if (!hasFinalBlocks && prevBlocks.length) {
                         turn.response_blocks = withoutStatusBlocks(prevBlocks);
                     }
-                    if (!turn.sql && prevSql) {
-                        turn.sql = prevSql;
-                    }
+                    if (!turn.sql && prevSql) turn.sql = prevSql;
                     if ((!Array.isArray(turn.columns) || !turn.columns.length) && prevColumns.length) {
                         turn.columns = prevColumns;
                     }
@@ -945,23 +957,20 @@
                     if ((turn.total_count == null) && (prevTotalCount != null)) {
                         turn.total_count = prevTotalCount;
                     }
-                    if (!turn.chart_intent && prevChartIntent) {
-                        turn.chart_intent = prevChartIntent;
-                    }
-                    if (!turn.plotly && prevPlotly) {
-                        turn.plotly = prevPlotly;
-                    }
-                    if (!turn.assistant_text && prevAssistantText) {
-                        turn.assistant_text = prevAssistantText;
-                    }
-                    if (turn.status !== 'streaming' && Array.isArray(turn.response_blocks)) {
+                    if (!turn.chart_intent && prevChartIntent) turn.chart_intent = prevChartIntent;
+                    if (!turn.plotly && prevPlotly) turn.plotly = prevPlotly;
+                    if (!turn.assistant_text && prevAssistantText) turn.assistant_text = prevAssistantText;
+                    if (Array.isArray(turn.response_blocks)) {
                         turn.response_blocks = withoutStatusBlocks(turn.response_blocks);
                     }
-                    state.conversationId = evt.data.conversation_id || state.conversationId;
                     renderConversation();
-                } else if (evt.type === 'error') {
+                    break;
+                }
+
+                if (result.status === 'failed') {
+                    const errMsg = (result.error && result.error.message) ? String(result.error.message) : 'Something went wrong';
                     turn.status = 'failed';
-                    turn.error = (evt.detail && String(evt.detail)) || 'Something went wrong';
+                    turn.error = errMsg;
                     if (Array.isArray(turn.response_blocks)) {
                         turn.response_blocks = withoutStatusBlocks(turn.response_blocks);
                     }
@@ -969,9 +978,25 @@
                         turn.response_blocks.push({ type: 'text', content: 'Request failed.' });
                     }
                     renderConversation();
-                    throw new Error(turn.error);
+                    throw new Error(errMsg);
                 }
-            });
+
+                if (result.status === 'stopped') {
+                    turn.status = 'failed';
+                    turn.error = 'Request stopped';
+                    if (Array.isArray(turn.response_blocks)) {
+                        turn.response_blocks = withoutStatusBlocks(turn.response_blocks);
+                    }
+                    turn.response_blocks.push({ type: 'text', content: 'Request stopped.' });
+                    renderConversation();
+                    throw new Error('Request stopped');
+                }
+
+                if (Date.now() - startedAt > maxWaitMs) {
+                    throw new Error('Timed out waiting for result');
+                }
+                await sleep(pollIntervalMs);
+            }
             await loadHistoryList();
         } catch (e) {
             setError(e && e.message ? e.message : 'Something went wrong');
@@ -1052,4 +1077,3 @@
         });
     loadHistoryList().catch(() => { });
 })();
-

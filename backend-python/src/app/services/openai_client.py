@@ -6,3 +6,7 @@ def get_openai_client() -> OpenAI:
     settings = get_settings()
     return OpenAI(api_key=settings.openai_api_key)
 
+
+def get_openai_model() -> str:
+    settings = get_settings()
+    return settings.openai_model

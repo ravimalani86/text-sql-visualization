@@ -16,11 +16,15 @@ def _env_bool(raw: str | None, *, default: bool) -> bool:
 class Settings:
     database_url: str
     openai_api_key: str
+    openai_model: str
     cors_allow_origins: list[str]
     max_result_rows: int
     max_turns_in_conversation: int
     schema_cache_ttl_seconds: float
     default_page_size: int
+    schema_search_max_tables: int
+    enable_sql_planning: bool
+    text_to_sql_max_correction_retries: int
     # When True, reuse SQL from any past successful turn with the same prompt (see find_latest_success_by_prompt).
     reuse_sql_from_history_by_prompt: bool
 
@@ -40,14 +44,19 @@ def get_settings() -> Settings:
     return Settings(
         database_url=database_url,
         openai_api_key=openai_api_key,
+        openai_model=os.environ.get("OPENAI_MODEL", "gpt-5").strip() or "gpt-5",
         cors_allow_origins=cors_allow_origins,
         max_result_rows=int(os.environ.get("MAX_RESULT_ROWS", "500")),
         max_turns_in_conversation=int(os.environ.get("MAX_TURNS_IN_CONVERSATION", "2")),
         schema_cache_ttl_seconds=float(os.environ.get("SCHEMA_CACHE_TTL_SECONDS", "300")),
         default_page_size=DEFAULT_PAGE_SIZE,
+        schema_search_max_tables=int(os.environ.get("SCHEMA_SEARCH_MAX_TABLES", "8")),
+        enable_sql_planning=_env_bool(os.environ.get("ENABLE_SQL_PLANNING"), default=True),
+        text_to_sql_max_correction_retries=int(
+            os.environ.get("TEXT_TO_SQL_MAX_CORRECTION_RETRIES", "2")
+        ),
         reuse_sql_from_history_by_prompt=_env_bool(
             os.environ.get("REUSE_SQL_FROM_HISTORY_BY_PROMPT"),
             default=True,
         ),
     )
-

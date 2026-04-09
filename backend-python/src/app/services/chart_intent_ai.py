@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from jinja2 import Template
 
-from app.services.openai_client import get_openai_client
+from app.services.openai_client import get_openai_client, get_openai_model
 
 
 ALLOWED_CHART_TYPES = {
@@ -105,7 +105,7 @@ def suggest_chart_intent(*, user_prompt: str, sql: str, columns: List[str]) -> D
 
     client = get_openai_client()
     resp = client.responses.create(
-        model="gpt-5",
+        model=get_openai_model(),
         input=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": json.dumps(payload)},
@@ -122,4 +122,3 @@ def suggest_chart_intent(*, user_prompt: str, sql: str, columns: List[str]) -> D
 
     raw = _extract_json_object(text)
     return _clean_intent(raw, available_columns=columns)
-

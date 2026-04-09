@@ -26,7 +26,9 @@ from app.services.plotly_mapper import build_plotly_figure
 from app.services.prompt_context import build_effective_prompt
 from app.core.config import DEFAULT_PAGE_SIZE
 from app.services.response_builder import build_assistant_text, build_response_blocks
-from app.services.sql_generator import text_to_sql
+from app.services.schema_selector import select_relevant_schema
+from app.services.sql_planner import generate_sql_plan
+from app.services.sql_generator import correct_sql, text_to_sql
 from app.services.sql_runtime import execute_count, execute_sql, normalize_and_validate_sql
 
 
@@ -255,16 +257,98 @@ def _analyze_core(
                 if not schema:
                     raise HTTPException(status_code=400, detail="No tables found in database")
 
-                sql = text_to_sql(effective_prompt, schema)
-                sql = normalize_and_validate_sql(sql)
-                emit({"type": "stage", "name": "sql_generated", "sql": sql})
+                emit(
+                    {
+                        "type": "stage",
+                        "name": "searching",
+                        "table_count": len(schema),
+                    }
+                )
+                selected_schema = select_relevant_schema(
+                    user_prompt=effective_prompt,
+                    schema=schema,
+                    max_tables=settings.schema_search_max_tables,
+                )
+                emit(
+                    {
+                        "type": "stage",
+                        "name": "searching_done",
+                        "retrieved_tables": list(selected_schema.keys()),
+                    }
+                )
 
-                total_count = execute_count(engine=engine, base_sql=sql)
-                out_columns, out_rows = execute_sql(engine=engine, sql=sql, max_rows=settings.max_result_rows)
+                reasoning_plan: Optional[str] = None
+                if settings.enable_sql_planning:
+                    emit({"type": "stage", "name": "planning"})
+                    reasoning_plan = generate_sql_plan(
+                        user_prompt=effective_prompt,
+                        schema=selected_schema,
+                    )
+                    emit(
+                        {
+                            "type": "stage",
+                            "name": "planning_done",
+                            "sql_generation_reasoning": reasoning_plan,
+                        }
+                    )
+
+                emit({"type": "stage", "name": "generating"})
+                sql = text_to_sql(
+                    effective_prompt,
+                    selected_schema,
+                    reasoning_plan=reasoning_plan,
+                )
+                sql = normalize_and_validate_sql(sql)
+                emit({"type": "stage", "name": "sql_generated", "sql": sql, "attempt": 0})
+
+                last_error_message = ""
+                for attempt in range(settings.text_to_sql_max_correction_retries + 1):
+                    try:
+                        total_count = execute_count(engine=engine, base_sql=sql)
+                        out_columns, out_rows = execute_sql(
+                            engine=engine,
+                            sql=sql,
+                            max_rows=settings.max_result_rows,
+                        )
+                        break
+                    except Exception as exc:
+                        last_error_message = str(exc)
+                        if attempt >= settings.text_to_sql_max_correction_retries:
+                            raise HTTPException(
+                                status_code=400,
+                                detail=f"Could not generate executable SQL. Last error: {last_error_message}",
+                            )
+                        emit(
+                            {
+                                "type": "stage",
+                                "name": "correcting",
+                                "attempt": attempt + 1,
+                                "invalid_sql": sql,
+                                "error": last_error_message,
+                            }
+                        )
+                        sql = correct_sql(
+                            user_prompt=effective_prompt,
+                            schema=selected_schema,
+                            invalid_sql=sql,
+                            error_message=last_error_message,
+                            reasoning_plan=reasoning_plan,
+                        )
+                        sql = normalize_and_validate_sql(sql)
+                        emit(
+                            {
+                                "type": "stage",
+                                "name": "sql_generated",
+                                "sql": sql,
+                                "attempt": attempt + 1,
+                            }
+                        )
+
                 emit(
                     {
                         "type": "stage",
                         "name": "query_executed",
+                        "sql": sql,
                         "columns": out_columns,
                         "row_count": len(out_rows),
                         "total_count": total_count,
@@ -450,4 +534,3 @@ async def analyze_stream(
         media_type="application/x-ndjson",
         headers={"Cache-Control": "no-cache"},
     )
-

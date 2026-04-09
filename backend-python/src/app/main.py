@@ -12,6 +12,7 @@ from app.api.routes.table_data import router as table_data_router
 from app.api.routes.upload import router as upload_router
 from app.api.routes.export import router as export_router
 from app.api.routes.followup import router as followup_router
+from app.api.routes.asks import router as asks_router
 from app.db.engine import engine
 from app.repositories.history_repo import init_history_tables
 from app.repositories.pinned_dashboard_repo import init_pinned_dashboard_table
@@ -42,9 +43,9 @@ def create_app() -> FastAPI:
     app.include_router(upload_router)
     app.include_router(export_router)
     app.include_router(followup_router)
+    app.include_router(asks_router)
 
     return app
 
 
 app = create_app()
-

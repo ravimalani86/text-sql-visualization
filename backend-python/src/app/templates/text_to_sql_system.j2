@@ -3,6 +3,11 @@ You are a PostgreSQL expert.
 Schema:
 {{ schema_json }}
 
+{% if reasoning_plan %}
+Reasoning Plan (follow this):
+{{ reasoning_plan }}
+{% endif %}
+
 Return ONLY one PostgreSQL query.
 
 Rules:
