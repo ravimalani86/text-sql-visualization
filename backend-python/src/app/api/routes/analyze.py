@@ -58,6 +58,74 @@ def _ndjson_line(obj: Dict[str, Any]) -> bytes:
     return (json.dumps(obj, default=str) + "\n").encode("utf-8")
 
 
+def _prompt_explicitly_wants_chart(prompt: str) -> bool:
+    p = (prompt or "").lower()
+    keywords = ("chart", "graph", "plot", "visual", "line", "bar", "area", "pie", "scatter", "stacked", "grouped")
+    return any(k in p for k in keywords)
+
+
+def _is_numeric_value(v: Any) -> bool:
+    if v is None or isinstance(v, bool):
+        return False
+    if isinstance(v, (int, float)):
+        return True
+    try:
+        float(str(v).replace(",", "").strip())
+        return True
+    except Exception:
+        return False
+
+
+def _fallback_chart_intent_for_explicit_request(*, prompt: str, columns: list[str], rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if not columns or not rows:
+        return {"make_chart": False}
+
+    numeric_cols: list[str] = []
+    for c in columns:
+        sample = next((r.get(c) for r in rows if r.get(c) is not None), None)
+        if _is_numeric_value(sample):
+            numeric_cols.append(c)
+    if not numeric_cols:
+        return {"make_chart": False}
+
+    x_col: Optional[str] = None
+    for c in columns:
+        if c in numeric_cols:
+            continue
+        sample = next((r.get(c) for r in rows if r.get(c) is not None), None)
+        if sample is not None:
+            x_col = c
+            break
+    if x_col is None:
+        x_col = columns[0] if columns else None
+
+    p = (prompt or "").lower()
+    chart_type = "bar"
+    if "line" in p or "month" in p or "year" in p or "trend" in p:
+        chart_type = "line"
+    elif "scatter" in p:
+        chart_type = "scatter"
+    elif "area" in p:
+        chart_type = "area"
+    elif "pie" in p:
+        chart_type = "pie"
+    elif "stacked" in p and "area" in p:
+        chart_type = "stacked_area"
+    elif "stacked" in p:
+        chart_type = "stacked_bar"
+    elif "grouped" in p:
+        chart_type = "grouped_bar"
+
+    intent: dict[str, Any] = {"make_chart": True, "chart_type": chart_type}
+    if x_col in columns:
+        intent["x"] = x_col
+    intent["y"] = numeric_cols[0]
+    if len(numeric_cols) > 1 and chart_type != "pie":
+        intent["y_fields"] = numeric_cols
+        intent["comparison_mode"] = "multi_metric"
+    return intent
+
+
 def _analyze_core(
     *,
     prompt: str,
@@ -97,7 +165,7 @@ def _analyze_core(
     chart_only_intent = False
     response_source = "llm"
     prompt_cache_hit = False
-    prompt_mentions_chart = is_chart_only_prompt(user_prompt)
+    prompt_mentions_chart = _prompt_explicitly_wants_chart(user_prompt)
     page_size = DEFAULT_PAGE_SIZE
 
     try:
@@ -199,6 +267,12 @@ def _analyze_core(
                             sql=sql,
                             columns=out_columns,
                         )
+                        if prompt_mentions_chart and not chart_intent.get("make_chart"):
+                            chart_intent = _fallback_chart_intent_for_explicit_request(
+                                prompt=user_prompt,
+                                columns=out_columns,
+                                rows=out_rows,
+                            )
                         emit({"type": "stage", "name": "chart_intent_ready", "chart_intent": chart_intent})
                         if chart_intent.get("make_chart"):
                             fig = build_plotly_figure(intent=chart_intent, columns=out_columns, rows=out_rows)
@@ -210,6 +284,12 @@ def _analyze_core(
                     sql=sql,
                     columns=out_columns,
                 )
+                if prompt_mentions_chart and not chart_intent.get("make_chart"):
+                    chart_intent = _fallback_chart_intent_for_explicit_request(
+                        prompt=user_prompt,
+                        columns=out_columns,
+                        rows=out_rows,
+                    )
                 emit({"type": "stage", "name": "chart_intent_ready", "chart_intent": chart_intent})
                 if chart_intent.get("make_chart"):
                     fig = build_plotly_figure(intent=chart_intent, columns=out_columns, rows=out_rows)
@@ -364,6 +444,12 @@ def _analyze_core(
                 sql=sql,
                 columns=out_columns,
             )
+            if prompt_mentions_chart and not chart_intent.get("make_chart"):
+                chart_intent = _fallback_chart_intent_for_explicit_request(
+                    prompt=user_prompt,
+                    columns=out_columns,
+                    rows=out_rows,
+                )
             emit({"type": "stage", "name": "chart_intent_ready", "chart_intent": chart_intent})
             if chart_intent.get("make_chart"):
                 fig = build_plotly_figure(intent=chart_intent, columns=out_columns, rows=out_rows)

@@ -82,6 +82,20 @@ def _pick_default_xy(columns: List[str], rows: List[Dict[str, Any]]) -> Tuple[Op
     return None, y
 
 
+def _pick_numeric_columns(columns: List[str], rows: List[Dict[str, Any]], *, exclude: Optional[set[str]] = None) -> List[str]:
+    if not columns or not rows:
+        return []
+    excluded = exclude or set()
+    numeric_cols: List[str] = []
+    for c in columns:
+        if c in excluded:
+            continue
+        sample = next((r.get(c) for r in rows if r.get(c) is not None), None)
+        if sample is not None and _is_number(sample):
+            numeric_cols.append(c)
+    return numeric_cols
+
+
 def _base_plotly_config() -> Dict[str, Any]:
     return {
         "responsive": True,
@@ -182,6 +196,10 @@ def build_plotly_figure(
     x_col = intent.get("x") if intent.get("x") in columns else None
     y_col = intent.get("y") if intent.get("y") in columns else None
     series_col = intent.get("series") if intent.get("series") in columns else None
+    y_fields_raw = intent.get("y_fields")
+    y_fields: List[str] = []
+    if isinstance(y_fields_raw, list):
+        y_fields = [str(c) for c in y_fields_raw if isinstance(c, str) and c in columns]
 
     if not x_col or not y_col:
         dx, dy = _pick_default_xy(columns, rows)
@@ -190,6 +208,12 @@ def build_plotly_figure(
 
     if not y_col:
         return None
+
+    if y_col and y_col not in y_fields:
+        y_fields = [y_col] + [c for c in y_fields if c != y_col]
+    y_fields = [c for c in y_fields if _column_is_numeric(c, rows)]
+    if not y_fields and y_col and _column_is_numeric(y_col, rows):
+        y_fields = [y_col]
 
     # For horizontal bars, Plotly expects numeric values on the x-axis.
     # If the intent swapped x/y (common in LLM output), correct it using actual row types.
@@ -241,8 +265,11 @@ def build_plotly_figure(
     if chart_type == "pie":
         if not x_col:
             return None
+        pie_value_col = y_fields[0] if y_fields else y_col
+        if not pie_value_col:
+            return None
         labels = [_to_label(r.get(x_col)) for r in rows]
-        values = [_to_float(r.get(y_col)) for r in rows]
+        values = [_to_float(r.get(pie_value_col)) for r in rows]
         pairs = [(lab, val) for lab, val in zip(labels, values) if val is not None]
         if not pairs:
             return None
@@ -270,6 +297,14 @@ def build_plotly_figure(
         layout["xaxis"]["title"]["text"] = "index"
     else:
         x_vals = [r.get(x_col) for r in rows]
+
+    multi_metric_types = {"line", "area", "step", "scatter", "bar", "grouped_bar", "stacked_bar", "stacked_area", "combo"}
+    if not series_col and chart_type in multi_metric_types and len(y_fields) <= 1:
+        inferred = _pick_numeric_columns(columns, rows, exclude={x_col} if x_col else set())
+        if inferred:
+            y_fields = inferred
+            y_col = y_fields[0]
+            layout["yaxis"]["title"]["text"] = "value"
 
     def build_trace(name: str, x_list: List[Any], y_list: List[Optional[float]]) -> Optional[Dict[str, Any]]:
         pts = [(x, y) for x, y in zip(x_list, y_list) if y is not None]
@@ -307,51 +342,84 @@ def build_plotly_figure(
 
     traces: List[Dict[str, Any]] = []
     if chart_type == "stacked_area":
-        if not series_col:
-            return None
-        layout["yaxis"]["title"]["text"] = y_col
+        if series_col and y_col:
+            layout["yaxis"]["title"]["text"] = y_col
+            groups: Dict[str, List[Dict[str, Any]]] = {}
+            for r in rows:
+                key = _to_label(r.get(series_col))
+                groups.setdefault(key, []).append(r)
 
-        groups: Dict[str, List[Dict[str, Any]]] = {}
-        for r in rows:
-            key = _to_label(r.get(series_col))
-            groups.setdefault(key, []).append(r)
-
-        for key in sorted(groups.keys()):
-            grp = groups[key]
-            xs = [g.get(x_col) if x_col else None for g in grp] if x_col else list(range(1, len(grp) + 1))
-            ys = [_to_float(g.get(y_col)) for g in grp]
-            pts = [(x, y) for x, y in zip(xs, ys) if y is not None]
-            if not pts:
-                continue
-            xs2, ys2 = zip(*pts)
-            traces.append(
-                {
-                    "type": "scatter",
-                    "mode": "lines",
-                    "x": [str(_to_label(v)) for v in xs2],
-                    "y": list(ys2),
-                    "name": key,
-                    "stackgroup": "one",
-                }
-            )
+            for key in sorted(groups.keys()):
+                grp = groups[key]
+                xs = [g.get(x_col) if x_col else None for g in grp] if x_col else list(range(1, len(grp) + 1))
+                ys = [_to_float(g.get(y_col)) for g in grp]
+                pts = [(x, y) for x, y in zip(xs, ys) if y is not None]
+                if not pts:
+                    continue
+                xs2, ys2 = zip(*pts)
+                traces.append(
+                    {
+                        "type": "scatter",
+                        "mode": "lines",
+                        "x": [str(_to_label(v)) for v in xs2],
+                        "y": list(ys2),
+                        "name": key,
+                        "stackgroup": "one",
+                    }
+                )
+        else:
+            if not y_fields:
+                return None
+            layout["yaxis"]["title"]["text"] = "value"
+            for metric in y_fields:
+                ys = [_to_float(r.get(metric)) for r in rows]
+                pts = [(x, y) for x, y in zip(x_vals, ys) if y is not None]
+                if not pts:
+                    continue
+                xs2, ys2 = zip(*pts)
+                traces.append(
+                    {
+                        "type": "scatter",
+                        "mode": "lines",
+                        "x": [str(_to_label(v)) for v in xs2],
+                        "y": list(ys2),
+                        "name": metric,
+                        "stackgroup": "one",
+                    }
+                )
         if not traces:
             return None
         return {"data": traces, "layout": layout, "config": config}
 
     if chart_type == "combo":
-        ys = [_to_float(r.get(y_col)) for r in rows]
-        pts = [(x, y) for x, y in zip(x_vals, ys) if y is not None]
-        if not pts:
+        combo_fields = y_fields if y_fields else ([y_col] if y_col else [])
+        combo_fields = [c for c in combo_fields if c]
+        if not combo_fields:
             return None
-        xs2, ys2 = zip(*pts)
-        x_labels = [str(_to_label(v)) for v in xs2]
-        traces = [
-            {"type": "bar", "x": x_labels, "y": list(ys2), "name": y_col},
-            {"type": "scatter", "mode": "lines+markers", "x": x_labels, "y": list(ys2), "name": y_col},
-        ]
-        traces[0]["marker"] = {"line": {"width": 0}}
-        traces[1]["line"] = {"width": 2.5}
-        traces[1]["marker"] = {"size": 6}
+        traces = []
+        for idx, metric in enumerate(combo_fields):
+            ys = [_to_float(r.get(metric)) for r in rows]
+            pts = [(x, y) for x, y in zip(x_vals, ys) if y is not None]
+            if not pts:
+                continue
+            xs2, ys2 = zip(*pts)
+            x_labels = [str(_to_label(v)) for v in xs2]
+            if idx == 0:
+                traces.append({"type": "bar", "x": x_labels, "y": list(ys2), "name": metric, "marker": {"line": {"width": 0}}})
+            else:
+                traces.append(
+                    {
+                        "type": "scatter",
+                        "mode": "lines+markers",
+                        "x": x_labels,
+                        "y": list(ys2),
+                        "name": metric,
+                        "line": {"width": 2.5},
+                        "marker": {"size": 6},
+                    }
+                )
+        if not traces:
+            return None
         return {"data": traces, "layout": layout, "config": config}
 
     if series_col:
@@ -362,15 +430,20 @@ def build_plotly_figure(
         for key in sorted(groups.keys()):
             grp = groups[key]
             xs = [g.get(x_col) if x_col else None for g in grp] if x_col else list(range(1, len(grp) + 1))
-            ys = [_to_float(g.get(y_col)) for g in grp]
-            tr = build_trace(key, xs, ys)
+            series_metrics = y_fields if y_fields else ([y_col] if y_col else [])
+            for metric in series_metrics:
+                ys = [_to_float(g.get(metric)) for g in grp]
+                trace_name = key if len(series_metrics) == 1 else f"{key} - {metric}"
+                tr = build_trace(trace_name, xs, ys)
+                if tr:
+                    traces.append(tr)
+    else:
+        single_or_multi_metrics = y_fields if y_fields else ([y_col] if y_col else [])
+        for metric in single_or_multi_metrics:
+            ys = [_to_float(r.get(metric)) for r in rows]
+            tr = build_trace(metric, x_vals, ys)
             if tr:
                 traces.append(tr)
-    else:
-        ys = [_to_float(r.get(y_col)) for r in rows]
-        tr = build_trace(y_col, x_vals, ys)
-        if tr:
-            traces.append(tr)
 
     if not traces:
         return None
@@ -390,4 +463,3 @@ def build_plotly_figure(
         layout["barmode"] = "group"
 
     return {"data": traces, "layout": layout, "config": config}
-
