@@ -4,6 +4,14 @@
     const ICON_REFRESH = '↻';
     const ICON_UNPIN = '✕';
     const GRID_CELL_PX = 80;
+    const CHART_MIN_W = 3;
+    const CHART_MIN_H = 3;
+    const CHART_DEFAULT_W = 4;
+    const CHART_DEFAULT_H_PX = 320;
+    const TABLE_MIN_W = 6;
+    const TABLE_MIN_H = 4;
+    const TABLE_DEFAULT_W = 12;
+    const TABLE_DEFAULT_H_PX = 400;
 
     const btnRefreshAll = document.getElementById('btnRefreshAll');
     const totalCharts = document.getElementById('totalCharts');
@@ -323,8 +331,8 @@
         const basePath = itemType === 'table' ? '/api/tables' : '/api/charts';
         await requestJson(`${basePath}/${item.id}/layout`, 'PATCH', {
             sort_order: Number.isFinite(item.sort_order) ? item.sort_order : null,
-            width_units: Number.isFinite(item.width_units) ? item.width_units : (itemType === 'table' ? 12 : 1),
-            height_px: Number.isFinite(item.height_px) ? item.height_px : (itemType === 'table' ? 400 : 320),
+            width_units: Number.isFinite(item.width_units) ? item.width_units : (itemType === 'table' ? TABLE_DEFAULT_W : CHART_DEFAULT_W),
+            height_px: Number.isFinite(item.height_px) ? item.height_px : (itemType === 'table' ? TABLE_DEFAULT_H_PX : CHART_DEFAULT_H_PX),
         });
     }
 
@@ -402,6 +410,13 @@
             grid = GridStack.init({
                 column: 12, cellHeight: GRID_CELL_PX, margin: 12,
                 animate: true, float: false, minRow: 1,
+                columnOpts: {
+                    breakpoints: [
+                        { w: 700, c: 1 },
+                        { w: 1100, c: 6 },
+                        { w: 1400, c: 12 },
+                    ],
+                },
                 draggable: { handle: ".chart-card-header, .table-card-header" },
                 resizable: { handles: "se" },
             }, "#dashboardGrid");
@@ -460,10 +475,11 @@
             <div class="chart-box"></div>
         </div>`;
 
-        const w = Number.isFinite(chart.width_units) ? chart.width_units : 4;
-        const heightPx = Number.isFinite(chart.height_px) ? chart.height_px : 320;
-        const h = Math.max(2, Math.round(heightPx / GRID_CELL_PX));
-        grid.addWidget(card, { w, h });
+        const configuredW = Number.isFinite(chart.width_units) ? chart.width_units : CHART_DEFAULT_W;
+        const w = Math.min(12, Math.max(CHART_MIN_W, configuredW));
+        const heightPx = Number.isFinite(chart.height_px) ? chart.height_px : CHART_DEFAULT_H_PX;
+        const h = Math.max(CHART_MIN_H, Math.round(heightPx / GRID_CELL_PX));
+        grid.addWidget(card, { w, h, minW: CHART_MIN_W, minH: CHART_MIN_H });
 
         const chartBox = card.querySelector(".chart-box");
         const chartEl = document.createElement("plotly-chart");
@@ -513,10 +529,11 @@
             <div class="table-card-body"></div>
         </div>`;
 
-        const w = Number.isFinite(tbl.width_units) ? tbl.width_units : 12;
-        const heightPx = Number.isFinite(tbl.height_px) ? tbl.height_px : 400;
-        const h = Math.max(3, Math.round(heightPx / GRID_CELL_PX));
-        grid.addWidget(card, { w, h });
+        const configuredW = Number.isFinite(tbl.width_units) ? tbl.width_units : TABLE_DEFAULT_W;
+        const w = Math.min(12, Math.max(TABLE_MIN_W, configuredW));
+        const heightPx = Number.isFinite(tbl.height_px) ? tbl.height_px : TABLE_DEFAULT_H_PX;
+        const h = Math.max(TABLE_MIN_H, Math.round(heightPx / GRID_CELL_PX));
+        grid.addWidget(card, { w, h, minW: TABLE_MIN_W, minH: TABLE_MIN_H });
 
         refreshTableCard(card, tbl);
         card.querySelector(".btn-refresh").onclick = () => refreshTableCard(card, tbl);

@@ -200,7 +200,7 @@ def build_plotly_figure(
             x_col, y_col = y_col, x_col
 
     title = intent.get("title") if isinstance(intent.get("title"), str) else None
-    title = title or "Query Result"
+    title = title or ""
 
     layout: Dict[str, Any] = _base_layout(
         title=title,

@@ -197,7 +197,7 @@ body {
 .chart-box {
   width: 100%;
   flex: 1 1 auto;
-  min-height: 0;
+  min-height: 220px;
   border: 1px solid var(--border);
   background: #fff;
   padding: 5px;
@@ -244,8 +244,12 @@ plotly-chart {
 }
 
 .grid-stack-item {
-  min-width: 420px;
+  min-width: 0;
   transition: all 0.25s ease;
+}
+
+.table-card .table-card-body {
+  min-height: 220px;
 }
 
 .grid-stack-item.ui-draggable-dragging {
@@ -504,5 +508,10 @@ plotly-chart {
 
   .chart-card.span-2 {
     grid-column: span 1;
+  }
+
+  .chart-box,
+  .table-card .table-card-body {
+    min-height: 200px;
   }
 }
