@@ -3,6 +3,10 @@
 
   const tableSelect = document.getElementById("tableSelect");
   const btnReload = document.getElementById("btnReload");
+  const btnImportData = document.getElementById("btnImportData");
+  const importCsvInput = document.getElementById("importCsvInput");
+  const importMessage = document.getElementById("importMessage");
+  const btnEmptyTable = document.getElementById("btnEmptyTable");
   const btnDeleteTable = document.getElementById("btnDeleteTable");
   const pageError = document.getElementById("pageError");
   const recordsInfo = document.getElementById("recordsInfo");
@@ -26,9 +30,31 @@
     pageError.textContent = msg;
   }
 
+  function setImportMessage(msg, isError) {
+    if (!importMessage) return;
+    if (!msg) {
+      importMessage.classList.add("hidden");
+      importMessage.textContent = "";
+      importMessage.classList.remove("import-message-success", "import-message-error");
+      return;
+    }
+    importMessage.textContent = msg;
+    importMessage.classList.remove("hidden");
+    importMessage.classList.toggle("import-message-error", !!isError);
+    importMessage.classList.toggle("import-message-success", !isError);
+    window.clearTimeout(importMessage._hideTimer);
+    importMessage._hideTimer = window.setTimeout(() => setImportMessage(""), 5000);
+  }
+
   function setLoading(loading) {
     state.loading = !!loading;
     btnReload.disabled = state.loading || !state.tableName;
+    if (btnImportData) {
+      btnImportData.disabled = state.loading;
+    }
+    if (btnEmptyTable) {
+      btnEmptyTable.disabled = state.loading || !state.tableName;
+    }
     if (btnDeleteTable) {
       btnDeleteTable.disabled = state.loading || !state.tableName;
     }
@@ -45,6 +71,18 @@
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       throw new Error(text || `Request failed: ${res.status}`);
+    }
+    return res.json();
+  }
+
+  async function uploadCsv(file) {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch(`${API}/upload-csv/`, { method: "POST", body: form });
+    if (!res.ok) {
+      const errBody = await res.json().catch(() => ({}));
+      const detail = errBody.detail || (await res.text().catch(() => "")) || `Upload failed: ${res.status}`;
+      throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
     }
     return res.json();
   }
@@ -206,6 +244,28 @@
     }
   }
 
+  async function emptyCurrentTable() {
+    if (!state.tableName) return;
+    const selectedTable = state.tableName;
+    const ok = window.confirm(`Empty table "${selectedTable}"? This will delete all records.`);
+    if (!ok) return;
+
+    setError(null);
+    setImportMessage("");
+    setLoading(true);
+    try {
+      await requestJson("/api/table-browser/empty-table", "POST", { table_name: selectedTable });
+      await loadTables();
+      await loadRows();
+      setImportMessage(`Emptied table: ${selectedTable}`, false);
+    } catch (err) {
+      setError(err && err.message ? err.message : "Failed to empty table");
+    } finally {
+      setLoading(false);
+      renderTable();
+    }
+  }
+
   async function reloadPage() {
     setError(null);
     setLoading(true);
@@ -228,9 +288,48 @@
   btnReload.addEventListener("click", () => {
     reloadPage();
   });
+
+  if (btnImportData && importCsvInput) {
+    btnImportData.addEventListener("click", () => importCsvInput.click());
+    importCsvInput.addEventListener("change", async () => {
+      const file = importCsvInput.files && importCsvInput.files[0];
+      importCsvInput.value = "";
+      if (!file) return;
+      if (!file.name.toLowerCase().endsWith(".csv")) {
+        setImportMessage("Please select a .csv file.", true);
+        return;
+      }
+
+      setError(null);
+      setImportMessage("");
+      const prevText = btnImportData.textContent;
+      setLoading(true);
+      btnImportData.textContent = "Uploading…";
+      try {
+        const data = await uploadCsv(file);
+        const tableName = data.table || file.name.replace(/\.csv$/i, "").toLowerCase();
+        state.tableName = tableName;
+        await loadTables();
+        await loadRows();
+        setImportMessage(`Imported as table: ${tableName}`, false);
+      } catch (err) {
+        setImportMessage(err && err.message ? err.message : "Upload failed", true);
+      } finally {
+        btnImportData.textContent = prevText;
+        setLoading(false);
+        renderTable();
+      }
+    });
+  }
+
   if (btnDeleteTable) {
     btnDeleteTable.addEventListener("click", () => {
       deleteCurrentTable();
+    });
+  }
+  if (btnEmptyTable) {
+    btnEmptyTable.addEventListener("click", () => {
+      emptyCurrentTable();
     });
   }
 

@@ -9,38 +9,38 @@ import {
   SimpleChanges,
   ViewChild,
 } from '@angular/core';
-import Plotly from 'plotly.js-dist-min';
+import { Chart, registerables, type ChartConfiguration } from 'chart.js';
 
-export type PlotlyJsonConfig = {
-  data: any[];
-  layout?: any;
-  config?: any;
-};
+Chart.register(...registerables);
+
+export type ChartJsJsonConfig = ChartConfiguration;
 
 @Component({
   selector: 'plotly-chart',
   standalone: true,
-  template: `<div #host class="plotly-host"></div>`,
+  template: `<canvas #canvas class="chart-canvas"></canvas>`,
   styles: [
     `
       :host {
         display: block;
       }
-      .plotly-host {
+      .chart-canvas {
         width: 100%;
         height: 100%;
+        display: block;
       }
     `,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class PlotlyChartComponent implements AfterViewInit, OnChanges, OnDestroy {
-  @Input() config: PlotlyJsonConfig | null = null;
+  @Input() config: ChartJsJsonConfig | null = null;
 
-  @ViewChild('host', { static: true })
-  private host!: ElementRef<HTMLDivElement>;
+  @ViewChild('canvas', { static: true })
+  private canvas!: ElementRef<HTMLCanvasElement>;
 
   private viewReady = false;
+  private chart: Chart | null = null;
 
   ngAfterViewInit(): void {
     this.viewReady = true;
@@ -54,38 +54,39 @@ export class PlotlyChartComponent implements AfterViewInit, OnChanges, OnDestroy
   }
 
   ngOnDestroy(): void {
-    try {
-      Plotly.purge(this.host.nativeElement);
-    } catch {
-      // best-effort cleanup only
-    }
+    this.destroyChart();
   }
 
   private async render(): Promise<void> {
     if (!this.viewReady) return;
 
-    const el = this.host.nativeElement;
     const cfg = this.config;
 
-    if (!cfg || !Array.isArray(cfg.data)) {
-      try {
-        Plotly.purge(el);
-      } catch {
-        // ignore
-      }
+    if (!cfg || typeof cfg !== 'object') {
+      this.destroyChart();
       return;
     }
 
-    const data = cfg.data;
-    const layout = cfg.layout ?? {};
-    const plotConfig = {
-      responsive: true,
-      displayModeBar: false,
-      displaylogo: false,
-      ...(cfg.config ?? {}),
+    const normalized: ChartConfiguration = {
+      ...(cfg as ChartConfiguration),
+      options: {
+        ...(cfg.options ?? {}),
+        responsive: true,
+        maintainAspectRatio: false,
+      },
     };
 
-    await Plotly.newPlot(el, data, layout, plotConfig);
+    this.destroyChart();
+    this.chart = new Chart(this.canvas.nativeElement, normalized);
+  }
+
+  private destroyChart(): void {
+    try {
+      this.chart?.destroy();
+    } catch {
+      // best-effort cleanup only
+    } finally {
+      this.chart = null;
+    }
   }
 }
-

@@ -24,9 +24,13 @@
         <label for="tableSelect" class="toolbar-label">Table</label>
         <select id="tableSelect" class="table-select"></select>
         <button id="btnReload" class="button" type="button">Reload</button>
+        <button id="btnImportData" class="button button-secondary" type="button" title="Upload a CSV file">Import Data</button>
+        <input type="file" id="importCsvInput" accept=".csv" hidden />
+        <button id="btnEmptyTable" class="button button-secondary" type="button">Empty Table</button>
         <button id="btnDeleteTable" class="button button-danger" type="button">Delete Table</button>
       </section>
 
+      <div id="importMessage" class="import-message hidden"></div>
       <div id="pageError" class="error hidden"></div>
       <div id="recordsInfo" class="records-info muted"></div>
 

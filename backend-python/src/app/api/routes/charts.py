@@ -87,6 +87,7 @@ async def api_refresh_chart(chart_id: str) -> Dict[str, Any]:
         "columns": out_columns,
         "data": out_rows,
         "plotly": fig,
+        "chart_config": fig,
         "chart_intent": chart_intent,
     }
 
@@ -111,4 +112,3 @@ async def api_update_chart_layout(chart_id: str, payload: ChartLayoutRequest) ->
     if not updated:
         raise HTTPException(status_code=404, detail="Chart not found")
     return {"item": updated}
-

@@ -7,7 +7,7 @@ A full-stack analytics app where users ask questions in natural language and get
 - Backend: FastAPI + SQLAlchemy + PostgreSQL
 - AI: OpenAI Responses API (`gpt-5`) for SQL generation, chart intent, and chat replies
 - Frontend: Vanilla JavaScript + HTML/CSS
-- Charts: Custom web component in `plotly-chart-wc`
+- Charts: Custom Chart.js-based web component in `plotly-chart-wc`
 - Containers: Docker Compose
 
 ## Project Structure
@@ -16,7 +16,7 @@ A full-stack analytics app where users ask questions in natural language and get
 code/
 ├─ backend-python/         # FastAPI backend
 ├─ frontend-javascript/    # Chat + dashboard UI (served by nginx in Docker)
-├─ plotly-chart-wc/        # Plotly web component (Angular build output used by frontend)
+├─ plotly-chart-wc/        # Chart.js web component (Angular build output used by frontend)
 ├─ docker-compose.yml
 └─ .gitignore
 ```

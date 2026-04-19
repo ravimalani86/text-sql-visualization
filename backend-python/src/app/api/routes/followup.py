@@ -108,6 +108,7 @@ async def seed_followup(payload: FollowupSeedRequest) -> Dict[str, Any]:
             "total_count": total_count,
             "chart_intent": chart_intent,
             "plotly": None,
+            "chart_config": None,
             "assistant_text": None,
             "response_blocks": response_blocks,
             "status": "success",
@@ -117,4 +118,3 @@ async def seed_followup(payload: FollowupSeedRequest) -> Dict[str, Any]:
             "item_id": item_id,
         },
     }
-

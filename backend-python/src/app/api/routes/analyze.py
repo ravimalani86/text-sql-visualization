@@ -22,7 +22,7 @@ from app.repositories.history_repo import (
 from app.services.chart_intent_ai import suggest_chart_intent
 from app.services.conversation_ai import generate_conversation_reply
 from app.services.intent import classify_intent, is_chart_only_prompt
-from app.services.plotly_mapper import build_plotly_figure
+from app.services.plotly_mapper import build_plotly_figure, normalize_chart_config
 from app.services.prompt_context import build_effective_prompt
 from app.core.config import DEFAULT_PAGE_SIZE
 from app.services.response_builder import build_assistant_text, build_response_blocks
@@ -200,6 +200,7 @@ def _analyze_core(
                 "data": [],
                 "chart_intent": {"make_chart": False},
                 "plotly": None,
+                "chart_config": None,
                 "assistant_text": assistant_text,
                 "response_blocks": response_blocks,
                 "status": "success",
@@ -254,13 +255,13 @@ def _analyze_core(
                     chart_intent = {"make_chart": False}
 
                 if isinstance(cached_plotly, dict):
-                    fig = cached_plotly
-                    emit({"type": "stage", "name": "chart_reused", "plotly": fig})
+                    fig = normalize_chart_config(cached_plotly)
+                    emit({"type": "stage", "name": "chart_reused", "chart_config": fig, "plotly": fig})
                 elif prompt_mentions_chart:
                     chart_prompt = user_prompt or f"Visualize this query result: {sql[:300]}"
                     if chart_intent.get("make_chart"):
                         fig = build_plotly_figure(intent=chart_intent, columns=out_columns, rows=out_rows)
-                        emit({"type": "stage", "name": "chart_ready", "plotly": fig})
+                        emit({"type": "stage", "name": "chart_ready", "chart_config": fig, "plotly": fig})
                     else:
                         chart_intent = suggest_chart_intent(
                             user_prompt=chart_prompt,
@@ -276,7 +277,7 @@ def _analyze_core(
                         emit({"type": "stage", "name": "chart_intent_ready", "chart_intent": chart_intent})
                         if chart_intent.get("make_chart"):
                             fig = build_plotly_figure(intent=chart_intent, columns=out_columns, rows=out_rows)
-                            emit({"type": "stage", "name": "chart_ready", "plotly": fig})
+                            emit({"type": "stage", "name": "chart_ready", "chart_config": fig, "plotly": fig})
             else:
                 chart_prompt = user_prompt or f"Visualize this query result: {sql[:300]}"
                 chart_intent = suggest_chart_intent(
@@ -293,13 +294,14 @@ def _analyze_core(
                 emit({"type": "stage", "name": "chart_intent_ready", "chart_intent": chart_intent})
                 if chart_intent.get("make_chart"):
                     fig = build_plotly_figure(intent=chart_intent, columns=out_columns, rows=out_rows)
-                    emit({"type": "stage", "name": "chart_ready", "plotly": fig})
+                    emit({"type": "stage", "name": "chart_ready", "chart_config": fig, "plotly": fig})
             response_blocks = []
             if fig:
                 response_blocks.append(
                     {
                         "type": "chart",
                         "chart_type": chart_intent.get("chart_type"),
+                        "chart_config": fig,
                         "plotly": fig,
                         "pin_action": {
                             "title": user_prompt[:120] or "Pinned chart",
@@ -453,7 +455,7 @@ def _analyze_core(
             emit({"type": "stage", "name": "chart_intent_ready", "chart_intent": chart_intent})
             if chart_intent.get("make_chart"):
                 fig = build_plotly_figure(intent=chart_intent, columns=out_columns, rows=out_rows)
-                emit({"type": "stage", "name": "chart_ready", "plotly": fig})
+                emit({"type": "stage", "name": "chart_ready", "chart_config": fig, "plotly": fig})
 
             assistant_text = build_assistant_text(
                 prompt=user_prompt,
@@ -551,6 +553,7 @@ def _analyze_core(
         "total_count": total_count,
         "chart_intent": chart_intent or {"make_chart": False},
         "plotly": fig,
+        "chart_config": fig,
         "assistant_text": assistant_text,
         "response_blocks": response_blocks or [],
         "status": "success",

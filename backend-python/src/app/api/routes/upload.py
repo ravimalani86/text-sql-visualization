@@ -23,6 +23,10 @@ class DeleteTableRequest(BaseModel):
     table_name: str
 
 
+class EmptyTableRequest(BaseModel):
+    table_name: str
+
+
 def _get_editable_tables() -> list[str]:
     inspector = inspect(engine)
     all_tables = inspector.get_table_names()
@@ -117,6 +121,23 @@ async def delete_table(payload: DeleteTableRequest) -> Dict[str, Any]:
     return {"status": "success", "table": table_name}
 
 
+@router.post("/api/table-browser/empty-table")
+async def empty_table(payload: EmptyTableRequest) -> Dict[str, Any]:
+    table_name = payload.table_name.strip()
+    if not table_name:
+        raise HTTPException(status_code=400, detail="table_name is required")
+
+    tables = _get_editable_tables()
+    if table_name not in tables:
+        raise HTTPException(status_code=404, detail="Table not found")
+
+    safe_table = table_name.replace('"', '""')
+    with engine.begin() as conn:
+        deleted = conn.execute(text(f'DELETE FROM "{safe_table}"'))
+
+    return {"status": "success", "table": table_name, "deleted": int(deleted.rowcount or 0)}
+
+
 @router.get("/clear-all-tables/")
 async def clear_all_tables() -> Dict[str, Any]:
     tables = _get_editable_tables()
@@ -136,4 +157,3 @@ async def clear_all_tables() -> Dict[str, Any]:
         "dropped_tables": tables,
         "count": len(tables),
     }
-

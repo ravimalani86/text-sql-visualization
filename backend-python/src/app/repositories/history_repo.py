@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import Engine, text
 
+from app.services.plotly_mapper import normalize_chart_config
 
 def _new_id() -> str:
     return str(uuid.uuid4())
@@ -310,7 +311,14 @@ def get_conversation_with_turns(engine: Engine, conversation_id: str) -> Optiona
             {"id": conversation_id},
         ).mappings().all()
 
-    return {"conversation": dict(conv), "turns": [dict(t) for t in turns]}
+    out_turns: List[Dict[str, Any]] = []
+    for t in turns:
+        d = dict(t)
+        d["plotly"] = normalize_chart_config(d.get("plotly"))
+        d["chart_config"] = d["plotly"]
+        out_turns.append(d)
+
+    return {"conversation": dict(conv), "turns": out_turns}
 
 
 def get_turn_by_id(engine: Engine, turn_id: str) -> Optional[Dict[str, Any]]:
@@ -328,4 +336,3 @@ def get_turn_by_id(engine: Engine, turn_id: str) -> Optional[Dict[str, Any]]:
             {"id": turn_id},
         ).mappings().first()
     return dict(row) if row else None
-

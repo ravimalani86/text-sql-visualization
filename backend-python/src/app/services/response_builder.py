@@ -113,9 +113,9 @@ def build_response_blocks(
             {
                 "type": "chart",
                 "chart_type": (chart_intent or {}).get("chart_type"),
+                "chart_config": plotly,
                 "plotly": plotly,
             }
         )
 
     return blocks
-

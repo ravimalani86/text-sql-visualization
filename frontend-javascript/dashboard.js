@@ -103,7 +103,7 @@
             const data = await postForm(`/api/charts/${chart.id}/refresh`, {});
             chartBox.innerHTML = '';
             const chartEl = document.createElement('plotly-chart');
-            chartEl.config = data.plotly || null;
+            chartEl.config = data.chart_config || data.plotly || null;
             chartBox.appendChild(chartEl);
             setTimeout(() => window.dispatchEvent(new Event("resize")), 120);
         } catch (err) {
