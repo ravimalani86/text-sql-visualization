@@ -11,7 +11,7 @@ This file is a practical playbook for working inside `backend-python` of the Tex
 - Main behavior:
   - Natural language to SQL (`analyze`)
   - SQL execution with safety validation (`SELECT` / `WITH` only)
-  - Optional chart intent + Chart.js config generation (stored in `plotly` for compatibility)
+  - Optional chart intent + Chart.js config generation (stored in `plotly`; also exposed as `chart_config`)
   - Conversation history persistence
   - Dashboard pinning for charts/tables
 
@@ -99,7 +99,7 @@ Routes in `app/api/routes/asks.py`:
 In-memory job store features:
 
 - stage to status mapping (`understanding/searching/planning/generating/...`)
-- stores preview rows, sql, chart intent, plotly (Chart.js config), retrieved tables
+- stores preview rows, sql, chart intent, `chart_config` (and `plotly` alias), retrieved tables
 - TTL cleanup (30 minutes)
 
 ## 5) API Surface Reference
@@ -117,6 +117,7 @@ Upload + table browser:
 - `GET /api/table-browser/tables`
 - `GET /api/table-browser/rows?table_name=...`
 - `DELETE /api/table-browser/record`
+- `POST /api/table-browser/empty-table`
 - `DELETE /api/table-browser/table`
 - `GET /clear-all-tables/`
 
@@ -155,7 +156,7 @@ Conversation storage (`history_repo`):
 
 - `conversations`
 - `conversation_turns`
-  - stores prompt, context_prompt, SQL, columns, data, chart_intent, plotly, response blocks, status, total_count
+  - stores prompt, context_prompt, SQL, columns, data, chart_intent, plotly (Chart.js config), response blocks, status, total_count
   - includes normalized prompt index for prompt-cache reuse
 
 Pinned dashboard storage (`pinned_dashboard_repo`):
@@ -203,8 +204,15 @@ When changing AI prompting:
 - Empty/invalid SQL:
   - inspect `sql_generated` and `correcting` stages
 - Unexpected chart not rendered:
-  - inspect `chart_intent.make_chart`, axis fields, and figure payload
+  - inspect `chart_intent.make_chart`, axis fields, and `chart_config`/`plotly` payload
 - Slow responses:
   - check schema size, `SCHEMA_SEARCH_MAX_TABLES`, and prompt-cache hit ratio
 - Wrong pagination totals:
   - verify base SQL stability and active filters/search criteria
+
+## 10) MCP Server (Optional)
+
+This backend includes an MCP stdio server at `app.mcp`.
+
+- Entry point: `python -m app.mcp`
+- Tools: `tables.list`, `tables.sample_rows`, `sql.execute` (read-only)
