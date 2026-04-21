@@ -27,21 +27,18 @@ code/
 - Or for local dev:
   - Python 3.12+
   - Node.js 20+ (for `plotly-chart-wc` build)
-  - PostgreSQL 15+
 
 ## Environment Variables
 
 Create `backend-python/.env` with at least:
 
 ```env
-DATABASE_URL=postgresql+psycopg://demo:demo@postgres:5432/analytics
+DATABASE_URL=postgresql+psycopg2://<db_user>:<db_password>@<db_host>:5432/<db_name>
 OPENAI_API_KEY=your_openai_api_key_here
 ```
 
 Notes:
-- In Docker, host `postgres` matches the service name from `docker-compose.yml`.
-- For local (non-Docker) backend, replace host with `localhost`:
-  - `postgresql+psycopg://demo:demo@localhost:5432/analytics`
+- This project expects an external/live PostgreSQL database via `DATABASE_URL`.
 
 ## Run with Docker (Recommended)
 
@@ -54,15 +51,10 @@ docker compose up --build
 Services:
 - Frontend: `http://localhost:3000`
 - Backend API: `http://localhost:8000`
-- PostgreSQL: `localhost:5432`
 
 ## Run Locally (Without Docker)
 
-### 1) Start PostgreSQL
-
-Ensure a database exists and is reachable using the `DATABASE_URL` you set.
-
-### 2) Run backend
+### 1) Run backend
 
 ```bash
 cd backend-python
@@ -70,7 +62,7 @@ pip install -r requirements.txt
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### 3) Build chart web component
+### 2) Build chart web component
 
 ```bash
 cd ../plotly-chart-wc
@@ -78,7 +70,7 @@ npm install
 npm run build
 ```
 
-### 4) Serve frontend files
+### 3) Serve frontend files
 
 From project root (or `frontend-javascript`), serve static files on port `3000`.
 One simple option:
