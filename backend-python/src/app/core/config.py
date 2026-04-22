@@ -27,6 +27,8 @@ class Settings:
     text_to_sql_max_correction_retries: int
     # When True, reuse SQL from any past successful turn with the same prompt (see find_latest_success_by_prompt).
     reuse_sql_from_history_by_prompt: bool
+    redis_url: str
+    schema_cache_key: str
 
 
 def get_settings() -> Settings:
@@ -59,4 +61,6 @@ def get_settings() -> Settings:
             os.environ.get("REUSE_SQL_FROM_HISTORY_BY_PROMPT"),
             default=True,
         ),
+        redis_url=os.environ.get("REDIS_URL", "redis://redis:6379/0").strip(),
+        schema_cache_key=os.environ.get("SCHEMA_CACHE_KEY", "app:db_schema:v1").strip(),
     )

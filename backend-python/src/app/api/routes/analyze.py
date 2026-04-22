@@ -11,7 +11,6 @@ from fastapi.responses import StreamingResponse
 
 from app.core.config import get_settings
 from app.db.engine import engine
-from app.db.schema import get_db_schema
 from app.repositories.history_repo import (
     conversation_exists,
     create_conversation,
@@ -26,6 +25,7 @@ from app.services.plotly_mapper import build_plotly_figure, normalize_chart_conf
 from app.services.prompt_context import build_effective_prompt
 from app.core.config import DEFAULT_PAGE_SIZE
 from app.services.response_builder import build_assistant_text, build_response_blocks
+from app.services.schema_cache import get_cached_schema
 from app.services.schema_selector import select_relevant_schema
 from app.services.sql_planner import generate_sql_plan
 from app.services.sql_generator import correct_sql, text_to_sql
@@ -33,25 +33,6 @@ from app.services.sql_runtime import execute_count, execute_sql, normalize_and_v
 
 
 router = APIRouter(tags=["analyze"])
-
-_SCHEMA_CACHE: Optional[Dict[str, Any]] = None
-_SCHEMA_CACHE_TS: Optional[float] = None
-
-
-def _get_cached_schema() -> Dict[str, Any]:
-    import time
-
-    global _SCHEMA_CACHE, _SCHEMA_CACHE_TS
-    settings = get_settings()
-    now = time.time()
-    if _SCHEMA_CACHE is not None and _SCHEMA_CACHE_TS is not None:
-        if now - _SCHEMA_CACHE_TS < settings.schema_cache_ttl_seconds:
-            return _SCHEMA_CACHE
-
-    schema = get_db_schema(engine)
-    _SCHEMA_CACHE = schema
-    _SCHEMA_CACHE_TS = now
-    return schema
 
 
 def _ndjson_line(obj: Dict[str, Any]) -> bytes:
@@ -171,9 +152,11 @@ def _analyze_core(
     try:
         intent_type = classify_intent(user_prompt)
         emit({"type": "stage", "name": "intent_classified", "intent_type": intent_type})
+
         if intent_type == "CONVERSATION":
             assistant_text = generate_conversation_reply(user_prompt)
             emit({"type": "stage", "name": "assistant_ready", "assistant_text": assistant_text})
+
             response_blocks = [{"type": "text", "content": assistant_text}]
             turn_id = save_turn(
                 engine,
@@ -232,18 +215,7 @@ def _analyze_core(
             out_columns = latest_turn.get("columns") or []
             out_rows = latest_turn.get("data") or []
             total_count = latest_turn.get("total_count") or len(out_rows)
-            emit(
-                {
-                    "type": "stage",
-                    "name": "reused_previous_result",
-                    "columns": out_columns,
-                    "row_count": len(out_rows),
-                    "total_count": total_count,
-                    "preview_rows": out_rows[:page_size],
-                    "page": 1,
-                    "page_size": page_size,
-                }
-            )
+            emit({ "type": "stage", "name": "reused_previous_result", "columns": out_columns, "row_count": len(out_rows), "total_count": total_count, "preview_rows": out_rows[:page_size], "page": 1, "page_size": page_size })
 
             if prompt_cache_hit:
                 cached_chart_intent = prompt_cache_turn.get("chart_intent")
@@ -321,43 +293,20 @@ def _analyze_core(
                 emit({"type": "stage", "name": "prompt_cache_hit", "sql": sql})
                 total_count = execute_count(engine=engine, base_sql=sql)
                 out_columns, out_rows = execute_sql(engine=engine, sql=sql, max_rows=settings.max_result_rows)
-                emit(
-                    {
-                        "type": "stage",
-                        "name": "query_executed",
-                        "sql": sql,
-                        "columns": out_columns,
-                        "row_count": len(out_rows),
-                        "total_count": total_count,
-                        "preview_rows": out_rows[:page_size],
-                        "page": 1,
-                        "page_size": page_size,
-                    }
-                )
+                
+                emit({ "type": "stage", "name": "query_executed", "sql": sql, "columns": out_columns, "row_count": len(out_rows), "total_count": total_count, "preview_rows": out_rows[:page_size], "page": 1, "page_size": page_size })
             else:
-                schema = _get_cached_schema()
+                schema = get_cached_schema()
                 if not schema:
                     raise HTTPException(status_code=400, detail="No tables found in database")
 
-                emit(
-                    {
-                        "type": "stage",
-                        "name": "searching",
-                        "table_count": len(schema),
-                    }
-                )
+                emit({ "type": "stage", "name": "searching", "table_count": len(schema) })
                 selected_schema = select_relevant_schema(
                     user_prompt=effective_prompt,
                     schema=schema,
                     max_tables=settings.schema_search_max_tables,
                 )
-                emit(
-                    {
-                        "type": "stage",
-                        "name": "searching_done",
-                        "retrieved_tables": list(selected_schema.keys()),
-                    }
-                )
+                emit({ "type": "stage", "name": "searching_done", "retrieved_tables": list(selected_schema.keys()) })
 
                 reasoning_plan: Optional[str] = None
                 if settings.enable_sql_planning:
@@ -366,13 +315,7 @@ def _analyze_core(
                         user_prompt=effective_prompt,
                         schema=selected_schema,
                     )
-                    emit(
-                        {
-                            "type": "stage",
-                            "name": "planning_done",
-                            "sql_generation_reasoning": reasoning_plan,
-                        }
-                    )
+                    emit({ "type": "stage", "name": "planning_done", "sql_generation_reasoning": reasoning_plan })
 
                 emit({"type": "stage", "name": "generating"})
                 sql = text_to_sql(
@@ -400,15 +343,7 @@ def _analyze_core(
                                 status_code=400,
                                 detail=f"Could not generate executable SQL. Last error: {last_error_message}",
                             )
-                        emit(
-                            {
-                                "type": "stage",
-                                "name": "correcting",
-                                "attempt": attempt + 1,
-                                "invalid_sql": sql,
-                                "error": last_error_message,
-                            }
-                        )
+                        emit({ "type": "stage", "name": "correcting", "attempt": attempt + 1, "invalid_sql": sql, "error": last_error_message })
                         sql = correct_sql(
                             user_prompt=effective_prompt,
                             schema=selected_schema,
@@ -417,28 +352,9 @@ def _analyze_core(
                             reasoning_plan=reasoning_plan,
                         )
                         sql = normalize_and_validate_sql(sql)
-                        emit(
-                            {
-                                "type": "stage",
-                                "name": "sql_generated",
-                                "sql": sql,
-                                "attempt": attempt + 1,
-                            }
-                        )
+                        emit({ "type": "stage", "name": "sql_generated", "sql": sql, "attempt": attempt + 1 })
 
-                emit(
-                    {
-                        "type": "stage",
-                        "name": "query_executed",
-                        "sql": sql,
-                        "columns": out_columns,
-                        "row_count": len(out_rows),
-                        "total_count": total_count,
-                        "preview_rows": out_rows[:page_size],
-                        "page": 1,
-                        "page_size": page_size,
-                    }
-                )
+                emit({ "type": "stage", "name": "query_executed", "sql": sql, "columns": out_columns, "row_count": len(out_rows), "total_count": total_count, "preview_rows": out_rows[:page_size], "page": 1, "page_size": page_size })
 
             chart_prompt = user_prompt or f"Visualize this query result: {sql[:300]}"
             chart_intent = suggest_chart_intent(

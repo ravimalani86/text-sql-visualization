@@ -15,6 +15,13 @@ services:
   #     retries: 20
   #   restart: unless-stopped
 
+  redis:
+    image: redis:7-alpine
+    container_name: redis-cache
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
   backend-python:
     build:
       context: ./backend-python
@@ -26,9 +33,11 @@ services:
       - "8000:8000"
     volumes:
       - ./backend-python/src:/app/src
-    # depends_on:
-    #   postgres:
-    #     condition: service_healthy
+    depends_on:
+      # postgres:
+      #   condition: service_healthy
+      redis:
+        condition: service_started
     restart: unless-stopped
 
   frontend-javascript:

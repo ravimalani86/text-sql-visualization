@@ -16,6 +16,7 @@ from app.api.routes.asks import router as asks_router
 from app.db.engine import engine
 from app.repositories.history_repo import init_history_tables
 from app.repositories.pinned_dashboard_repo import init_pinned_dashboard_table
+from app.services.schema_cache import warm_schema_cache
 
 
 def create_app() -> FastAPI:
@@ -32,8 +33,13 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def _on_startup() -> None:
-        init_history_tables(engine)
-        init_pinned_dashboard_table(engine)
+        print("on_startup")
+        # init_history_tables(engine)
+        # print("init_history_tables")
+        # init_pinned_dashboard_table(engine)
+        # print("init_pinned_dashboard_table")
+        warm_schema_cache()
+        print("warm_schema_cache")
 
     app.include_router(analyze_router)
     app.include_router(history_router)
