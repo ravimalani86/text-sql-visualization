@@ -55,6 +55,8 @@ Startup behavior:
 
 - Initializes conversation tables (`init_history_tables`)
 - Initializes pinned dashboard table (`init_pinned_dashboard_table`)
+- Warms schema cache (`warm_schema_cache`)
+- Schema introspection skips missing tables from `ALLOWED_TABLE` instead of crashing startup
 
 ## 3) Core Workflow (Analyze Path)
 
@@ -201,6 +203,7 @@ When changing AI prompting:
 
 - Startup fails immediately:
   - check `DATABASE_URL`, `OPENAI_API_KEY`
+  - if logs show `NoSuchTableError` for domain tables (e.g. `sales`), confirm your target DB has those tables; startup now skips missing tables during schema relationship introspection
 - Empty/invalid SQL:
   - inspect `sql_generated` and `correcting` stages
 - Unexpected chart not rendered:
@@ -210,9 +213,7 @@ When changing AI prompting:
 - Wrong pagination totals:
   - verify base SQL stability and active filters/search criteria
 
-## 10) MCP Server (Optional)
+## 10) Notes
 
-This backend includes an MCP stdio server at `app.mcp`.
-
-- Entry point: `python -m app.mcp`
-- Tools: `tables.list`, `tables.sample_rows`, `sql.execute` (read-only)
+- This guide reflects the active FastAPI backend flow in `app.main`.
+- If optional modules are removed (for example, MCP-only code paths), update this guide and local runbooks accordingly.

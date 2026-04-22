@@ -31,8 +31,11 @@ def get_relationships(engine: Engine, tables: list[str]) -> list[str]:
 
     inspector = inspect(engine)
     relationships = []
+    existing_tables = set(inspector.get_table_names())
 
     for table in tables:
+        if table not in existing_tables:
+            continue  # skip invalid table names
         fks = inspector.get_foreign_keys(table)
         print("fks: ", fks)
         for fk in fks:

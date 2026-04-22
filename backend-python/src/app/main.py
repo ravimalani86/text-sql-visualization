@@ -34,10 +34,10 @@ def create_app() -> FastAPI:
     @app.on_event("startup")
     async def _on_startup() -> None:
         print("on_startup")
-        # init_history_tables(engine)
-        # print("init_history_tables")
-        # init_pinned_dashboard_table(engine)
-        # print("init_pinned_dashboard_table")
+        init_history_tables(engine)
+        print("init_history_tables")
+        init_pinned_dashboard_table(engine)
+        print("init_pinned_dashboard_table")
         warm_schema_cache()
         print("warm_schema_cache")
 
