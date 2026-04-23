@@ -10,6 +10,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 
 from app.api.routes.analyze import _analyze_core
+from app.langgraph_analyzer import analyze_with_langgraph
 
 
 router = APIRouter(tags=["asks"])
@@ -150,7 +151,7 @@ def _handle_emit(query_id: str, payload: Dict[str, Any]) -> None:
 
 def _run_ask_job(query_id: str, query: str, conversation_id: Optional[str]) -> None:
     try:
-        final_result = _analyze_core(
+        final_result = analyze_with_langgraph(
             prompt=query,
             conversation_id=conversation_id,
             emit_event=lambda payload: _handle_emit(query_id, payload),

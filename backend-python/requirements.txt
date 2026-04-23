@@ -11,3 +11,4 @@ reportlab==4.4.1
 SQLAlchemy==2.0.46
 uvicorn==0.35.0
 redis==5.2.1
+langgraph
