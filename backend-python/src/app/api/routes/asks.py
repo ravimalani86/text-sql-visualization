@@ -9,7 +9,6 @@ from typing import Any, Dict, Literal, Optional
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 
-from app.api.routes.analyze import _analyze_core
 from app.langgraph_analyzer import analyze_with_langgraph
 
 

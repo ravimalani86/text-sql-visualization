@@ -6,7 +6,7 @@ from typing import Any, Dict, List, Optional
 
 from jinja2 import Template
 
-from app.services.openai_client import get_openai_client, get_openai_model
+from app.services.llm_client import get_llm_client, get_llm_model, get_response_text
 
 
 ALLOWED_CHART_TYPES = {
@@ -124,16 +124,17 @@ def suggest_chart_intent(*, user_prompt: str, sql: str, columns: List[str]) -> D
         "available_columns": columns,
     }
 
-    client = get_openai_client()
-    resp = client.responses.create(
-        model=get_openai_model(),
-        input=[
-            {"role": "system", "content": system_prompt},
+    client = get_llm_client()
+    resp = client.messages.create(
+        model=get_llm_model(),
+        max_tokens=1200,
+        system=system_prompt,
+        messages=[
             {"role": "user", "content": json.dumps(payload)},
         ],
     )
 
-    text = (getattr(resp, "output_text", None) or "").strip()
+    text = get_response_text(resp)
     try:
         raw = json.loads(text)
         if isinstance(raw, dict):

@@ -4,7 +4,6 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
-from app.api.routes.analyze import router as analyze_router
 from app.api.routes.charts import router as charts_router
 from app.api.routes.history import router as history_router
 from app.api.routes.tables import router as tables_router
@@ -41,7 +40,6 @@ def create_app() -> FastAPI:
         warm_schema_cache()
         print("warm_schema_cache")
 
-    app.include_router(analyze_router)
     app.include_router(history_router)
     app.include_router(charts_router)
     app.include_router(tables_router)

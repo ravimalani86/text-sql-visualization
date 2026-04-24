@@ -6,7 +6,7 @@ from typing import Any
 
 from jinja2 import Template
 
-from app.services.openai_client import get_openai_client, get_openai_model
+from app.services.llm_client import get_llm_client, get_llm_model, get_response_text
 
 
 _TEMPLATE_PATH = Path(__file__).resolve().parent.parent / "templates" / "schema_selection_system.j2"
@@ -53,15 +53,16 @@ def select_relevant_schema(
         "schema": schema,
         "max_tables": max_tables,
     }
-    client = get_openai_client()
-    response = client.responses.create(
-        model=get_openai_model(),
-        input=[
-            {"role": "system", "content": _render_system_prompt()},
+    client = get_llm_client()
+    response = client.messages.create(
+        model=get_llm_model(),
+        max_tokens=1200,
+        system=_render_system_prompt(),
+        messages=[
             {"role": "user", "content": json.dumps(payload, ensure_ascii=True)},
         ],
     )
-    selected = _extract_table_names(response.output_text or "")
+    selected = _extract_table_names(get_response_text(response))
     valid_selected = [name for name in selected if name in schema]
     if not valid_selected:
         # Safe fallback: deterministic first N tables.

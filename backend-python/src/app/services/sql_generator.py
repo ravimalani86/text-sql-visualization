@@ -7,7 +7,7 @@ from typing import Any
 
 from jinja2 import Template
 
-from app.services.openai_client import get_openai_client, get_openai_model
+from app.services.llm_client import get_llm_client, get_llm_model, get_response_text
 
 
 _TEMPLATE_PATH = Path(__file__).resolve().parent.parent / "templates" / "text_to_sql_system.j2"
@@ -42,17 +42,18 @@ def _extract_sql(response_text: str) -> str:
 
 def text_to_sql(user_prompt: str, schema: dict[str, Any], reasoning_plan: str | None = None) -> str:
     system_prompt = render_sql_system_prompt(schema=schema, reasoning_plan=reasoning_plan)
-    client = get_openai_client()
+    client = get_llm_client()
 
-    response = client.responses.create(
-        model=get_openai_model(),
-        input=[
-            {"role": "system", "content": system_prompt},
+    response = client.messages.create(
+        model=get_llm_model(),
+        max_tokens=1500,
+        system=system_prompt,
+        messages=[
             {"role": "user", "content": user_prompt},
         ],
     )
 
-    return _extract_sql(response.output_text or "")
+    return _extract_sql(get_response_text(response))
 
 
 def correct_sql(
@@ -70,13 +71,14 @@ def correct_sql(
         "error_message": error_message,
         "reasoning_plan": (reasoning_plan or "").strip(),
     }
-    client = get_openai_client()
+    client = get_llm_client()
 
-    response = client.responses.create(
-        model=get_openai_model(),
-        input=[
-            {"role": "system", "content": system_prompt},
+    response = client.messages.create(
+        model=get_llm_model(),
+        max_tokens=1500,
+        system=system_prompt,
+        messages=[
             {"role": "user", "content": json.dumps(correction_payload, ensure_ascii=True)},
         ],
     )
-    return _extract_sql(response.output_text or "")
+    return _extract_sql(get_response_text(response))

@@ -6,7 +6,7 @@ from typing import Any
 
 from jinja2 import Template
 
-from app.services.openai_client import get_openai_client, get_openai_model
+from app.services.llm_client import get_llm_client, get_llm_model, get_response_text
 
 
 _TEMPLATE_PATH = Path(__file__).resolve().parent.parent / "templates" / "sql_planner_system.j2"
@@ -22,13 +22,14 @@ def generate_sql_plan(*, user_prompt: str, schema: dict[str, Any]) -> str:
         "user_prompt": user_prompt,
         "schema": schema,
     }
-    client = get_openai_client()
-    response = client.responses.create(
-        model=get_openai_model(),
-        input=[
-            {"role": "system", "content": _render_system_prompt()},
+    client = get_llm_client()
+    response = client.messages.create(
+        model=get_llm_model(),
+        max_tokens=1200,
+        system=_render_system_prompt(),
+        messages=[
             {"role": "user", "content": json.dumps(payload, ensure_ascii=True)},
         ],
     )
-    plan = (response.output_text or "").strip()
+    plan = get_response_text(response)
     return plan[:2000]

@@ -15,8 +15,8 @@ def _env_bool(raw: str | None, *, default: bool) -> bool:
 @dataclass(frozen=True)
 class Settings:
     database_url: str
-    openai_api_key: str
-    openai_model: str
+    anthropic_api_key: str
+    anthropic_model: str
     cors_allow_origins: list[str]
     max_result_rows: int
     max_turns_in_conversation: int
@@ -25,7 +25,6 @@ class Settings:
     schema_search_max_tables: int
     enable_sql_planning: bool
     text_to_sql_max_correction_retries: int
-    # When True, reuse SQL from any past successful turn with the same prompt (see find_latest_success_by_prompt).
     reuse_sql_from_history_by_prompt: bool
     redis_url: str
     schema_cache_key: str
@@ -36,17 +35,17 @@ def get_settings() -> Settings:
     if not database_url:
         raise RuntimeError("DATABASE_URL environment variable is not set")
 
-    openai_api_key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if not openai_api_key:
-        raise RuntimeError("OPENAI_API_KEY environment variable is not set")
+    anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+    if not anthropic_api_key:
+        raise RuntimeError("ANTHROPIC_API_KEY environment variable is not set")
 
     # Keep default compatible with current frontend
     cors_allow_origins = ["http://localhost:3000"]
 
     return Settings(
         database_url=database_url,
-        openai_api_key=openai_api_key,
-        openai_model=os.environ.get("OPENAI_MODEL", "gpt-5").strip() or "gpt-5",
+        anthropic_api_key=anthropic_api_key,
+        anthropic_model=os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001").strip(),
         cors_allow_origins=cors_allow_origins,
         max_result_rows=int(os.environ.get("MAX_RESULT_ROWS", "500")),
         max_turns_in_conversation=int(os.environ.get("MAX_TURNS_IN_CONVERSATION", "2")),

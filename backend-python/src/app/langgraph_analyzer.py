@@ -77,7 +77,6 @@ def validate_and_setup(state: AnalyzeState) -> AnalyzeState:
 
     latest_turns = get_latest_success_turns(engine, conversation_id, limit=settings.max_turns_in_conversation)
     state["latest_turns"] = latest_turns
-    latest_turn = latest_turns[0] if latest_turns else None
     effective_prompt = build_effective_prompt(user_prompt, latest_turns)
     state["effective_prompt"] = effective_prompt
 
