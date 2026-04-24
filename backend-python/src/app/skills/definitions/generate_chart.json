@@ -1,0 +1,36 @@
+{
+  "name": "generate_chart",
+  "description": "Infer chart intent and generate chart config from SQL result rows.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "user_prompt": {
+        "type": "string"
+      },
+      "sql": {
+        "type": "string"
+      },
+      "columns": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "rows": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      },
+      "force_chart": {
+        "type": "boolean"
+      }
+    },
+    "required": [
+      "user_prompt",
+      "sql",
+      "columns",
+      "rows"
+    ]
+  }
+}

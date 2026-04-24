@@ -102,8 +102,8 @@
         try {
             const data = await postForm(`/api/charts/${chart.id}/refresh`, {});
             chartBox.innerHTML = '';
-            const chartEl = document.createElement('plotly-chart');
-            chartEl.config = data.chart_config || data.plotly || null;
+            const chartEl = document.createElement('chartjs-chart');
+            chartEl.config = data.chart_config || null;
             chartBox.appendChild(chartEl);
             setTimeout(() => window.dispatchEvent(new Event("resize")), 120);
         } catch (err) {
@@ -387,7 +387,7 @@
         const closeBtn = document.createElement("button");
         closeBtn.className = "chart-fullscreen-close";
         closeBtn.innerText = "✕";
-        const chart = document.createElement("plotly-chart");
+        const chart = document.createElement("chartjs-chart");
         chart.config = chartConfig;
         content.appendChild(closeBtn);
         content.appendChild(chart);
@@ -423,7 +423,7 @@
 
             grid.on("change", async () => { await persistFromGrid(); });
             grid.on("resize", (event, el) => {
-                const c = el.querySelector("plotly-chart");
+                const c = el.querySelector("chartjs-chart");
                 if (c) { c.style.width = "100%"; c.style.height = "100%"; }
             });
             grid.on("resizestop", (event, el) => {
@@ -482,18 +482,18 @@
         grid.addWidget(card, { w, h, minW: CHART_MIN_W, minH: CHART_MIN_H });
 
         const chartBox = card.querySelector(".chart-box");
-        const chartEl = document.createElement("plotly-chart");
+        const chartEl = document.createElement("chartjs-chart");
         chartEl.style.width = "100%";
         chartEl.style.height = "100%";
         chartBox.appendChild(chartEl);
 
         refreshChart(card, chart);
         card.querySelector(".chart-box").ondblclick = () => {
-            const ce = card.querySelector("plotly-chart");
+            const ce = card.querySelector("chartjs-chart");
             if (ce) openFullscreenChart(ce.config);
         };
         card.querySelector(".btn-fullscreen").onclick = () => {
-            const ce = card.querySelector("plotly-chart");
+            const ce = card.querySelector("chartjs-chart");
             if (ce) openFullscreenChart(ce.config);
         };
         card.querySelector(".btn-refresh").onclick = () => refreshChart(card, chart);

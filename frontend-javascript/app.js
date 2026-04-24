@@ -641,8 +641,8 @@
 
         box.appendChild(toolbar);
 
-        const chartEl = document.createElement('plotly-chart');
-        chartEl.className = 'plotly-embedded';
+        const chartEl = document.createElement('chartjs-chart');
+        chartEl.className = 'chart-embedded';
         chartEl.config = chartConfig;
         box.appendChild(chartEl);
         return box;
@@ -652,10 +652,10 @@
         const blocks = Array.isArray(turn.response_blocks) ? [...turn.response_blocks] : [];
         if (blocks.length) {
             const suppressAuto = !!(turn && (turn.suppress_auto_blocks || turn.hide_user));
-            const hasChartBlock = blocks.some((b) => b && b.type === 'chart' && (b.chart_config || b.plotly));
-            const turnChart = turn.chart_config || turn.plotly;
+            const hasChartBlock = blocks.some((b) => b && b.type === 'chart' && b.chart_config);
+            const turnChart = turn.chart_config;
             if (!suppressAuto && !hasChartBlock && turnChart) {
-                blocks.push({ type: 'chart', chart_type: turn.chart_intent && turn.chart_intent.chart_type, chart_config: turnChart, plotly: turnChart });
+                blocks.push({ type: 'chart', chart_type: turn.chart_intent && turn.chart_intent.chart_type, chart_config: turnChart });
             }
             const nonStatusBlocks = [];
             let latestStatus = null;
@@ -682,9 +682,9 @@
         if (Array.isArray(turn.columns) && Array.isArray(turn.data) && turn.columns.length) {
             fallback.push({ type: 'table', columns: turn.columns, rows: turn.data });
         }
-        const turnChart = turn.chart_config || turn.plotly;
+        const turnChart = turn.chart_config;
         if (turnChart) {
-            fallback.push({ type: 'chart', chart_type: turn.chart_intent && turn.chart_intent.chart_type, chart_config: turnChart, plotly: turnChart });
+            fallback.push({ type: 'chart', chart_type: turn.chart_intent && turn.chart_intent.chart_type, chart_config: turnChart });
         }
         if (turn.status === 'streaming') {
             fallback.push({ type: 'status', content: turn.assistant_text || 'Thinking' });
@@ -734,8 +734,8 @@
                     body.appendChild(createCodeBlock(block.sql));
                 } else if (block.type === 'table') {
                     body.appendChild(createTableBlock(block.columns || [], block.rows || [], block.meta || null, turn));
-                } else if (block.type === 'chart' && (block.chart_config || block.plotly)) {
-                    body.appendChild(createChartBlock(block.chart_config || block.plotly, block.chart_type, turn));
+                } else if (block.type === 'chart' && block.chart_config) {
+                    body.appendChild(createChartBlock(block.chart_config, block.chart_type, turn));
                 } else if (block.type === 'status') {
                     const status = document.createElement('div');
                     status.className = 'message-status';
@@ -819,7 +819,6 @@
                 total_count: null,
                 chart_intent: null,
                 chart_config: null,
-                plotly: null,
                 assistant_text: '',
                 response_blocks: [{ type: 'status', content: 'Thinking' }],
                 status: 'streaming',
@@ -860,8 +859,7 @@
                 data: Array.isArray(data.data) ? data.data : [],
                 total_count: data.total_count || null,
                 chart_intent: data.chart_intent || null,
-                chart_config: data.chart_config || data.plotly || null,
-                plotly: data.plotly || data.chart_config || null,
+                chart_config: data.chart_config || null,
                 assistant_text: data.assistant_text || '',
                 response_blocks: Array.isArray(data.response_blocks) ? data.response_blocks : [],
                 status: data.status || 'success',
@@ -923,15 +921,13 @@
                 if (result.chart_intent) {
                     turn.chart_intent = result.chart_intent;
                 }
-                const chartCfg = result.chart_config || result.plotly;
+                const chartCfg = result.chart_config;
                 if (chartCfg) {
                     turn.chart_config = chartCfg;
-                    turn.plotly = chartCfg;
                     upsertBlock('chart', {
                         type: 'chart',
                         chart_type: turn.chart_intent && turn.chart_intent.chart_type,
                         chart_config: chartCfg,
-                        plotly: chartCfg,
                     });
                 }
                 if (result.assistant_text) {
@@ -947,7 +943,6 @@
                     const prevTotalCount = turn.total_count;
                     const prevChartIntent = turn.chart_intent;
                     const prevChartConfig = turn.chart_config;
-                    const prevPlotly = turn.plotly;
                     const prevAssistantText = turn.assistant_text;
                     const finalTurn = mapFinalTurn(result.result);
                     const hasFinalBlocks = Array.isArray(finalTurn.response_blocks) && finalTurn.response_blocks.length > 0;
@@ -967,7 +962,6 @@
                     }
                     if (!turn.chart_intent && prevChartIntent) turn.chart_intent = prevChartIntent;
                     if (!turn.chart_config && prevChartConfig) turn.chart_config = prevChartConfig;
-                    if (!turn.plotly && prevPlotly) turn.plotly = prevPlotly;
                     if (!turn.assistant_text && prevAssistantText) turn.assistant_text = prevAssistantText;
                     if (Array.isArray(turn.response_blocks)) {
                         turn.response_blocks = withoutStatusBlocks(turn.response_blocks);

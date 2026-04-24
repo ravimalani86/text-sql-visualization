@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy import Engine, text
 
-from app.services.plotly_mapper import normalize_chart_config
+from app.services.chartjs_mapper import normalize_chart_config
 
 def _new_id() -> str:
     return str(uuid.uuid4())
@@ -60,7 +60,7 @@ def init_history_tables(engine: Engine) -> None:
                     columns JSONB,
                     data JSONB,
                     chart_intent JSONB,
-                    plotly JSONB,
+                    chart_config JSONB,
                     assistant_text TEXT,
                     response_blocks JSONB,
                     status TEXT NOT NULL,
@@ -136,7 +136,7 @@ def save_turn(
     columns: Optional[List[str]],
     data: Optional[List[Dict[str, Any]]],
     chart_intent: Optional[Dict[str, Any]],
-    plotly: Optional[Dict[str, Any]],
+    chart_config: Optional[Dict[str, Any]],
     assistant_text: Optional[str],
     response_blocks: Optional[List[Dict[str, Any]]],
     status: str,
@@ -151,13 +151,13 @@ def save_turn(
                 """
                 INSERT INTO conversation_turns (
                     id, conversation_id, prompt, prompt_normalized, context_prompt, sql,
-                    columns, data, chart_intent, plotly, assistant_text, response_blocks,
+                    columns, data, chart_intent, chart_config, assistant_text, response_blocks,
                     status, error, total_count
                 )
                 VALUES (
                     CAST(:id AS UUID), CAST(:conversation_id AS UUID), :prompt, :prompt_normalized, :context_prompt, :sql,
                     CAST(:columns AS JSONB), CAST(:data AS JSONB),
-                    CAST(:chart_intent AS JSONB), CAST(:plotly AS JSONB),
+                    CAST(:chart_intent AS JSONB), CAST(:chart_config AS JSONB),
                     :assistant_text, CAST(:response_blocks AS JSONB),
                     :status, :error, :total_count
                 )
@@ -173,7 +173,7 @@ def save_turn(
                 "columns": _to_json(columns),
                 "data": _to_json(data),
                 "chart_intent": _to_json(chart_intent),
-                "plotly": _to_json(plotly),
+                "chart_config": _to_json(chart_config),
                 "assistant_text": assistant_text,
                 "response_blocks": _to_json(response_blocks),
                 "status": status,
@@ -199,7 +199,7 @@ def get_latest_success_turns(engine: Engine, conversation_id: str, limit: int = 
         rows = conn.execute(
             text(
                 """
-                SELECT id::text, prompt, sql, columns, data, chart_intent, plotly, total_count, created_at
+                SELECT id::text, prompt, sql, columns, data, chart_intent, chart_config, total_count, created_at
                 FROM conversation_turns
                 WHERE conversation_id = CAST(:id AS UUID) AND status = 'success'
                 ORDER BY created_at DESC
@@ -220,7 +220,7 @@ def find_latest_success_by_prompt(engine: Engine, prompt: str) -> Optional[Dict[
         row = conn.execute(
             text(
                 """
-                SELECT id::text, conversation_id::text, prompt, sql, columns, data, chart_intent, plotly, total_count, created_at
+                SELECT id::text, conversation_id::text, prompt, sql, columns, data, chart_intent, chart_config, total_count, created_at
                 FROM conversation_turns
                 WHERE status = 'success'
                   AND prompt_normalized = :prompt_normalized
@@ -296,7 +296,7 @@ def get_conversation_with_turns(engine: Engine, conversation_id: str) -> Optiona
                     columns,
                     data,
                     chart_intent,
-                    plotly,
+                    chart_config,
                     assistant_text,
                     response_blocks,
                     status,
@@ -314,8 +314,7 @@ def get_conversation_with_turns(engine: Engine, conversation_id: str) -> Optiona
     out_turns: List[Dict[str, Any]] = []
     for t in turns:
         d = dict(t)
-        d["plotly"] = normalize_chart_config(d.get("plotly"))
-        d["chart_config"] = d["plotly"]
+        d["chart_config"] = normalize_chart_config(d.get("chart_config"))
         out_turns.append(d)
 
     return {"conversation": dict(conv), "turns": out_turns}

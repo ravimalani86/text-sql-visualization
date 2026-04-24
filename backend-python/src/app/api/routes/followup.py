@@ -36,7 +36,6 @@ async def seed_followup(payload: FollowupSeedRequest) -> Dict[str, Any]:
     out_rows: list[dict[str, Any]]
     total_count: Optional[int] = None
     chart_intent: dict[str, Any] = {"make_chart": False}
-    plotly: Optional[dict[str, Any]] = None
 
     if item_type == "chart":
         chart = get_chart(engine, item_id)
@@ -54,9 +53,6 @@ async def seed_followup(payload: FollowupSeedRequest) -> Dict[str, Any]:
             chart_intent["y"] = chart.get("y_field")
         if chart.get("series_field") in out_columns:
             chart_intent["series"] = chart.get("series_field")
-        # Keep plotly out of the seeded follow-up turn to avoid UI auto-rendering charts.
-        plotly = None
-
     else:
         tbl = get_table(engine, item_id)
         if not tbl:
@@ -66,7 +62,6 @@ async def seed_followup(payload: FollowupSeedRequest) -> Dict[str, Any]:
         total_count = execute_count(engine=engine, base_sql=sql)
         out_columns, out_rows = execute_sql(engine=engine, sql=sql, max_rows=settings.max_result_rows)
         chart_intent = {"make_chart": False}
-        plotly = None
 
     # Follow-up UI should render only a lightweight banner message.
     # We still save SQL/data on the turn so the next user prompt has context.
@@ -89,7 +84,7 @@ async def seed_followup(payload: FollowupSeedRequest) -> Dict[str, Any]:
         columns=out_columns,
         data=out_rows,
         chart_intent=chart_intent,
-        plotly=None,
+        chart_config=None,
         assistant_text=None,
         response_blocks=response_blocks,
         status="success",
@@ -107,7 +102,6 @@ async def seed_followup(payload: FollowupSeedRequest) -> Dict[str, Any]:
             "data": out_rows[: payload.page_size],
             "total_count": total_count,
             "chart_intent": chart_intent,
-            "plotly": None,
             "chart_config": None,
             "assistant_text": None,
             "response_blocks": response_blocks,

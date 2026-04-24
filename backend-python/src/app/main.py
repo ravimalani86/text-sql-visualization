@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
+from app.core.logging_config import setup_logging
 from app.api.routes.charts import router as charts_router
 from app.api.routes.history import router as history_router
 from app.api.routes.tables import router as tables_router
@@ -12,13 +15,17 @@ from app.api.routes.upload import router as upload_router
 from app.api.routes.export import router as export_router
 from app.api.routes.followup import router as followup_router
 from app.api.routes.asks import router as asks_router
+from app.mcp.server import router as mcp_router
 from app.db.engine import engine
 from app.repositories.history_repo import init_history_tables
 from app.repositories.pinned_dashboard_repo import init_pinned_dashboard_table
 from app.services.schema_cache import warm_schema_cache
 
+logger = logging.getLogger(__name__)
+
 
 def create_app() -> FastAPI:
+    setup_logging()
     settings = get_settings()
     app = FastAPI(title="AI Analytics Backend")
 
@@ -32,13 +39,13 @@ def create_app() -> FastAPI:
 
     @app.on_event("startup")
     async def _on_startup() -> None:
-        print("on_startup")
+        logger.info("[STARTUP] Application startup begin")
         init_history_tables(engine)
-        print("init_history_tables")
+        logger.info("[STARTUP] init_history_tables completed")
         init_pinned_dashboard_table(engine)
-        print("init_pinned_dashboard_table")
+        logger.info("[STARTUP] init_pinned_dashboard_table completed")
         warm_schema_cache()
-        print("warm_schema_cache")
+        logger.info("[STARTUP] warm_schema_cache completed")
 
     app.include_router(history_router)
     app.include_router(charts_router)
@@ -48,6 +55,7 @@ def create_app() -> FastAPI:
     app.include_router(export_router)
     app.include_router(followup_router)
     app.include_router(asks_router)
+    app.include_router(mcp_router)
 
     return app
 

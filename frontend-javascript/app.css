@@ -717,7 +717,7 @@ td {
   cursor: default;
 }
 
-.plotly-embedded {
+.chart-embedded {
   width: 100%;
   height: 320px;
   display: block;
@@ -727,7 +727,7 @@ td {
 }
 
 @media (max-width:768px) {
-  .plotly-embedded {
+  .chart-embedded {
     height: 280px;
   }
 }

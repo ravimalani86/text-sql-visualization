@@ -16,7 +16,7 @@ Chart.register(...registerables);
 export type ChartJsJsonConfig = ChartConfiguration;
 
 @Component({
-  selector: 'plotly-chart',
+  selector: 'chartjs-chart',
   standalone: true,
   template: `<canvas #canvas class="chart-canvas"></canvas>`,
   styles: [
@@ -33,7 +33,7 @@ export type ChartJsJsonConfig = ChartConfiguration;
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class PlotlyChartComponent implements AfterViewInit, OnChanges, OnDestroy {
+export class ChartjsChartComponent implements AfterViewInit, OnChanges, OnDestroy {
   @Input() config: ChartJsJsonConfig | null = null;
 
   @ViewChild('canvas', { static: true })

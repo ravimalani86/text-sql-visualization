@@ -137,7 +137,7 @@ def _is_chartjs_config(obj: Any) -> bool:
     return isinstance(data, dict) and isinstance(data.get("datasets"), list)
 
 
-def _is_plotly_figure(obj: Any) -> bool:
+def _is_legacy_figure(obj: Any) -> bool:
     if not isinstance(obj, dict):
         return False
     data = obj.get("data")
@@ -146,15 +146,15 @@ def _is_plotly_figure(obj: Any) -> bool:
 
 def normalize_chart_config(config: Any) -> Any:
     """
-    Backwards/forwards compatible normalization for the `plotly` JSON field.
+    Backwards/forwards compatible chart configuration normalization.
 
-    - Old values: Plotly figure dicts: {data: [...], layout?: {...}, config?: {...}}
+    - Old values: legacy figure dicts: {data: [...], layout?: {...}, config?: {...}}
     - New values: Chart.js config dicts: {type: 'bar'|'line'|..., data: {labels, datasets}, options?: {...}}
     """
     if _is_chartjs_config(config):
         return config
-    if _is_plotly_figure(config):
-        return _plotly_figure_to_chartjs(config)
+    if _is_legacy_figure(config):
+        return _legacy_figure_to_chartjs(config)
     return config
 
 
@@ -170,7 +170,7 @@ def _merge_labels(label_lists: List[List[str]]) -> List[str]:
     return out
 
 
-def _plotly_figure_to_chartjs(fig: Dict[str, Any]) -> Dict[str, Any]:
+def _legacy_figure_to_chartjs(fig: Dict[str, Any]) -> Dict[str, Any]:
     data = fig.get("data")
     layout = fig.get("layout") if isinstance(fig.get("layout"), dict) else {}
     if not isinstance(data, list):
@@ -411,7 +411,7 @@ def _plotly_figure_to_chartjs(fig: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _base_plotly_config() -> Dict[str, Any]:
+def _base_chart_render_config() -> Dict[str, Any]:
     return {
         "responsive": True,
         "displayModeBar": False,
@@ -445,7 +445,7 @@ def _base_layout(*, title: str, x_title: str, y_title: str, horizontal: bool = F
         yaxis["title"]["text"] = x_title
 
     return {
-        "template": "plotly_white",
+        "template": "chartjs_white",
         "paper_bgcolor": "#ffffff",
         "plot_bgcolor": "#ffffff",
         "font": {"family": "Inter, Segoe UI, Roboto, Arial, sans-serif", "size": 13, "color": "#0f172a"},
@@ -494,7 +494,7 @@ def _base_layout(*, title: str, x_title: str, y_title: str, horizontal: bool = F
     }
 
 
-def build_plotly_figure(
+def build_chart_config(
     *,
     intent: Dict[str, Any],
     columns: List[str],
@@ -530,7 +530,7 @@ def build_plotly_figure(
     if not y_fields and y_col and _column_is_numeric(y_col, rows):
         y_fields = [y_col]
 
-    # For horizontal bars, Plotly expects numeric values on the x-axis.
+    # For horizontal bars, ChartJs expects numeric values on the x-axis.
     # If the intent swapped x/y (common in LLM output), correct it using actual row types.
     if chart_type == "horizontal_bar" and x_col and y_col:
         x_is_num = _column_is_numeric(x_col, rows)
@@ -547,7 +547,7 @@ def build_plotly_figure(
         y_title=y_col,
         horizontal=(chart_type == "horizontal_bar"),
     )
-    config: Dict[str, Any] = _base_plotly_config()
+    config: Dict[str, Any] = _base_chart_render_config()
 
     # --- UI polish for ALL charts ---
     max_x_label_len = 0
@@ -590,9 +590,9 @@ def build_plotly_figure(
             return None
         labels2, values2 = zip(*pairs)
         # Pie traces do not use cartesian axes; keeping xaxis/yaxis as null
-        # can break rendering in some Plotly wrapper setups.
+        # can break rendering in some ChartJs wrapper setups.
         pie_layout = {k: v for k, v in layout.items() if k not in ("xaxis", "yaxis")}
-        return _plotly_figure_to_chartjs(
+        return _legacy_figure_to_chartjs(
             {
             "data": [
                 {
@@ -706,7 +706,7 @@ def build_plotly_figure(
                 )
         if not traces:
             return None
-        return _plotly_figure_to_chartjs({"data": traces, "layout": layout, "config": config})
+        return _legacy_figure_to_chartjs({"data": traces, "layout": layout, "config": config})
 
     if chart_type == "combo":
         combo_fields = y_fields if y_fields else ([y_col] if y_col else [])
@@ -737,7 +737,7 @@ def build_plotly_figure(
                 )
         if not traces:
             return None
-        return _plotly_figure_to_chartjs({"data": traces, "layout": layout, "config": config})
+        return _legacy_figure_to_chartjs({"data": traces, "layout": layout, "config": config})
 
     if series_col:
         groups: Dict[str, List[Dict[str, Any]]] = {}
@@ -779,4 +779,5 @@ def build_plotly_figure(
     elif chart_type == "grouped_bar":
         layout["barmode"] = "group"
 
-    return _plotly_figure_to_chartjs({"data": traces, "layout": layout, "config": config})
+    return _legacy_figure_to_chartjs({"data": traces, "layout": layout, "config": config})
+

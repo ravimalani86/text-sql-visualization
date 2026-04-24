@@ -70,7 +70,6 @@ def _new_job(*, query_id: str, query: str, conversation_id: Optional[str]) -> Di
         "total_count": None,
         "chart_intent": None,
         "chart_config": None,
-        "plotly": None,
         "assistant_text": None,
         "retrieved_tables": [],
         "sql_generation_reasoning": None,
@@ -135,10 +134,6 @@ def _handle_emit(query_id: str, payload: Dict[str, Any]) -> None:
         if stage_name in ("chart_ready", "chart_reused"):
             if isinstance(payload.get("chart_config"), dict):
                 job["chart_config"] = payload.get("chart_config")
-                job["plotly"] = payload.get("chart_config")
-            elif isinstance(payload.get("plotly"), dict):
-                job["plotly"] = payload.get("plotly")
-                job["chart_config"] = payload.get("plotly")
         if stage_name == "assistant_ready" and payload.get("assistant_text"):
             job["assistant_text"] = payload.get("assistant_text")
         if stage_name == "searching_done" and isinstance(payload.get("retrieved_tables"), list):
@@ -227,7 +222,6 @@ class AskResultResponse(BaseModel):
     total_count: Optional[int] = None
     chart_intent: Optional[dict[str, Any]] = None
     chart_config: Optional[dict[str, Any]] = None
-    plotly: Optional[dict[str, Any]] = None
     assistant_text: Optional[str] = None
     retrieved_tables: list[str] = Field(default_factory=list)
     sql_generation_reasoning: Optional[str] = None
@@ -276,8 +270,7 @@ async def get_ask_result(query_id: str) -> AskResultResponse:
         preview_rows=list(job.get("preview_rows") or []),
         total_count=job.get("total_count"),
         chart_intent=job.get("chart_intent"),
-        chart_config=job.get("chart_config") or job.get("plotly"),
-        plotly=job.get("plotly"),
+        chart_config=job.get("chart_config"),
         assistant_text=job.get("assistant_text"),
         retrieved_tables=list(job.get("retrieved_tables") or []),
         sql_generation_reasoning=job.get("sql_generation_reasoning"),

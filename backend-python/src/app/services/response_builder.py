@@ -60,7 +60,7 @@ def build_response_blocks(
     columns: List[str],
     rows: List[Dict[str, Any]],
     chart_intent: Optional[Dict[str, Any]],
-    plotly: Optional[Dict[str, Any]],
+    chart_config: Optional[Dict[str, Any]],
     total_count: Optional[int] = None,
     page: int = 1,
     page_size: int = DEFAULT_PAGE_SIZE,
@@ -108,13 +108,12 @@ def build_response_blocks(
                 }
             )
 
-    if plotly and (wants_chart or effective_total >= 3):
+    if chart_config and (wants_chart or effective_total >= 3):
         blocks.append(
             {
                 "type": "chart",
                 "chart_type": (chart_intent or {}).get("chart_type"),
-                "chart_config": plotly,
-                "plotly": plotly,
+                "chart_config": chart_config,
             }
         )
 

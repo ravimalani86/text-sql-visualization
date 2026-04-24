@@ -1,0 +1,22 @@
+{
+  "name": "generate_sql",
+  "description": "Generate SQL for a user prompt using selected schema and optional reasoning plan.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "user_prompt": {
+        "type": "string"
+      },
+      "selected_schema": {
+        "type": "object"
+      },
+      "reasoning_plan": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "user_prompt",
+      "selected_schema"
+    ]
+  }
+}

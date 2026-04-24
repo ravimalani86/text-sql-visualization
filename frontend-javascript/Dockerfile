@@ -1,9 +1,9 @@
 FROM node:20-alpine AS wc-builder
 
 WORKDIR /wc
-COPY plotly-chart-wc/package.json plotly-chart-wc/package-lock.json* ./
+COPY chartjs-chart-wc/package.json chartjs-chart-wc/package-lock.json* ./
 RUN npm ci
-COPY plotly-chart-wc/ ./
+COPY chartjs-chart-wc/ ./
 RUN npm run build
 
 
@@ -22,7 +22,7 @@ COPY frontend-javascript/tables.css /usr/share/nginx/html/tables.css
 COPY frontend-javascript/favicon.svg /usr/share/nginx/html/favicon.svg
 
 # Web component bundle (keep same URL path used by index.html)
-COPY --from=wc-builder /wc/dist/plotly-chart-wc/browser/ /usr/share/nginx/html/plotly-chart-wc/dist/plotly-chart-wc/browser/
+COPY --from=wc-builder /wc/dist/chartjs-chart-wc/browser/ /usr/share/nginx/html/chartjs-chart-wc/dist/chartjs-chart-wc/browser/
 
 EXPOSE 80
 

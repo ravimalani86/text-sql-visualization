@@ -1,0 +1,45 @@
+{
+  "name": "build_response",
+  "description": "Build assistant_text and response_blocks from prompt, SQL, data, and chart config.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "prompt": {
+        "type": "string"
+      },
+      "sql": {
+        "type": "string"
+      },
+      "columns": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      },
+      "rows": {
+        "type": "array",
+        "items": {
+          "type": "object"
+        }
+      },
+      "chart_intent": {
+        "type": "object"
+      },
+      "fig": {
+        "type": "object"
+      },
+      "total_count": {
+        "type": "integer"
+      },
+      "page_size": {
+        "type": "integer"
+      }
+    },
+    "required": [
+      "prompt",
+      "sql",
+      "columns",
+      "rows"
+    ]
+  }
+}

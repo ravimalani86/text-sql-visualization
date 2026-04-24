@@ -1,0 +1,15 @@
+{
+  "name": "validate_sql",
+  "description": "Normalize and validate generated SQL; only SELECT/CTE is allowed.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "sql": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "sql"
+    ]
+  }
+}

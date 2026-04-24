@@ -6,7 +6,7 @@
   },
   "newProjectRoot": "projects",
   "projects": {
-    "plotly-chart-wc": {
+    "chartjs-chart-wc": {
       "projectType": "application",
       "schematics": {
         "@schematics/angular:class": {
@@ -84,10 +84,10 @@
           "builder": "@angular/build:dev-server",
           "configurations": {
             "production": {
-              "buildTarget": "plotly-chart-wc:build:production"
+              "buildTarget": "chartjs-chart-wc:build:production"
             },
             "development": {
-              "buildTarget": "plotly-chart-wc:build:development"
+              "buildTarget": "chartjs-chart-wc:build:development"
             }
           },
           "defaultConfiguration": "development"

@@ -1,0 +1,18 @@
+{
+  "name": "get_schema",
+  "description": "Fetch cached database schema and select relevant tables for the prompt.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "user_prompt": {
+        "type": "string"
+      },
+      "max_tables": {
+        "type": "integer"
+      }
+    },
+    "required": [
+      "user_prompt"
+    ]
+  }
+}

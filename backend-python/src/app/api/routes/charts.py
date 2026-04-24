@@ -15,7 +15,7 @@ from app.repositories.charts_repo import (
 )
 from app.schemas.charts import ChartLayoutRequest, ChartPinRequest
 from app.services.chart_intent_ai import suggest_chart_intent
-from app.services.plotly_mapper import build_plotly_figure
+from app.services.chartjs_mapper import build_chart_config
 from app.services.sql_runtime import execute_sql, normalize_and_validate_sql
 
 
@@ -80,13 +80,12 @@ async def api_refresh_chart(chart_id: str) -> Dict[str, Any]:
             if "series" not in chart_intent and refined.get("series") in out_columns:
                 chart_intent["series"] = refined.get("series")
 
-    fig = build_plotly_figure(intent=chart_intent, columns=out_columns, rows=out_rows) if out_rows else None
+    fig = build_chart_config(intent=chart_intent, columns=out_columns, rows=out_rows) if out_rows else None
     return {
         "item": chart,
         "sql": sql,
         "columns": out_columns,
         "data": out_rows,
-        "plotly": fig,
         "chart_config": fig,
         "chart_intent": chart_intent,
     }

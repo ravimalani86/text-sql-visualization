@@ -1,0 +1,30 @@
+{
+  "name": "correct_sql",
+  "description": "Repair invalid SQL using user prompt, selected schema, and execution error.",
+  "input_schema": {
+    "type": "object",
+    "properties": {
+      "user_prompt": {
+        "type": "string"
+      },
+      "selected_schema": {
+        "type": "object"
+      },
+      "invalid_sql": {
+        "type": "string"
+      },
+      "error_message": {
+        "type": "string"
+      },
+      "reasoning_plan": {
+        "type": "string"
+      }
+    },
+    "required": [
+      "user_prompt",
+      "selected_schema",
+      "invalid_sql",
+      "error_message"
+    ]
+  }
+}

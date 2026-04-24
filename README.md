@@ -7,7 +7,7 @@ A full-stack analytics app where users ask questions in natural language and get
 - Backend: FastAPI + SQLAlchemy + PostgreSQL
 - AI: Anthropic Claude Messages API for SQL generation, chart intent, and chat replies
 - Frontend: Vanilla JavaScript + HTML/CSS
-- Charts: Custom Chart.js-based web component in `plotly-chart-wc`
+- Charts: Custom Chart.js-based web component in `chartjs-chart-wc`
 - Containers: Docker Compose
 
 ## Project Structure
@@ -16,7 +16,7 @@ A full-stack analytics app where users ask questions in natural language and get
 code/
 ├─ backend-python/         # FastAPI backend
 ├─ frontend-javascript/    # Chat + dashboard UI (served by nginx in Docker)
-├─ plotly-chart-wc/        # Chart.js web component (Angular build output used by frontend)
+├─ chartjs-chart-wc/       # Chart.js web component (Angular build output used by frontend)
 ├─ docker-compose.yml
 └─ .gitignore
 ```
@@ -26,7 +26,7 @@ code/
 - Docker + Docker Compose (recommended)
 - Or for local dev:
   - Python 3.12+
-  - Node.js 20+ (for `plotly-chart-wc` build)
+  - Node.js 20+ (for `chartjs-chart-wc` build)
 
 ## Environment Variables
 
@@ -66,7 +66,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ### 2) Build chart web component
 
 ```bash
-cd ../plotly-chart-wc
+cd ../chartjs-chart-wc
 npm install
 npm run build
 ```
