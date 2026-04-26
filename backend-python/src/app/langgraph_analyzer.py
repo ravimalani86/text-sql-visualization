@@ -1,9 +1,9 @@
 import os
+import json
 import logging
 from typing import TypedDict, Optional, List, Dict, Any, Callable
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph
 from datetime import datetime
-from fastapi import HTTPException
 
 from app.core.config import get_settings, DEFAULT_PAGE_SIZE
 from app.db.engine import engine
@@ -16,12 +16,30 @@ from app.repositories.history_repo import (
 from app.services.conversation_ai import generate_conversation_reply
 from app.services.intent import classify_intent
 from app.services.prompt_context import build_effective_prompt
-from app.services.sql_runtime import execute_count, execute_sql, normalize_and_validate_sql
 from app.skills.llm_client import generate_agent_step
 from app.skills.skill_executor import execute_skill
 from app.skills.skill_registry import load_tool_specs
 
 logger = logging.getLogger(__name__)
+LLM_LOG_MAX_CHARS = 4000
+
+
+def _truncate_for_log(value: Any, max_chars: int = LLM_LOG_MAX_CHARS) -> str:
+    try:
+        text = json.dumps(value, ensure_ascii=False, default=str)
+    except Exception:
+        text = repr(value)
+    if len(text) > max_chars:
+        return f"{text[:max_chars]}... [truncated {len(text) - max_chars} chars]"
+    return text
+
+
+def _log_llm_input(llm_name: str, payload: Dict[str, Any]) -> None:
+    logger.info("[LLM][INPUT] model=%s payload=%s", llm_name, _truncate_for_log(payload))
+
+
+def _log_llm_output(llm_name: str, payload: Any) -> None:
+    logger.info("[LLM][OUTPUT] model=%s payload=%s", llm_name, _truncate_for_log(payload))
 
 
 class AnalyzeState(TypedDict):
@@ -32,25 +50,22 @@ class AnalyzeState(TypedDict):
     latest_turns: Optional[List[Dict[str, Any]]]
     effective_prompt: Optional[str]
     sql: Optional[str]
-    out_columns: Optional[List[str]]
-    out_rows: Optional[List[Dict[str, Any]]]
+    result_columns: Optional[List[str]]
+    result_rows: Optional[List[Dict[str, Any]]]
     total_count: Optional[int]
     chart_intent: Optional[Dict[str, Any]]
-    fig: Optional[Dict[str, Any]]
+    chart_config: Optional[Dict[str, Any]]
     assistant_text: Optional[str]
     response_blocks: Optional[List[Dict[str, Any]]]
-    chart_only_intent: bool
     response_source: str
-    prompt_cache_hit: bool
     prompt_mentions_chart: bool
     page_size: int
     schema: Optional[Dict[str, Any]]
     selected_schema: Optional[Dict[str, Any]]
-    reasoning_plan: Optional[str]
-    last_error_message: str
+    sql_plan: Optional[str]
+    error_message: str
     attempt: int
     agent_steps: List[Dict[str, Any]]
-    error: Optional[str]
     turn_id: Optional[str]
 
 
@@ -72,11 +87,7 @@ def validate_and_setup(state: AnalyzeState) -> AnalyzeState:
         engine,
         title=user_prompt[:120],
     )
-    logger.info(
-        "[REQUEST] conversation_id=%s prompt=%s",
-        conversation_id,
-        user_prompt[:240],
-    )
+    logger.info("[validate_and_setup] conversation_id=%s", conversation_id)
     state["conversation_id"] = conversation_id
     emit(state, {"type": "meta", "conversation_id": conversation_id})
 
@@ -91,25 +102,29 @@ def validate_and_setup(state: AnalyzeState) -> AnalyzeState:
 
 
 def classify_intent_node(state: AnalyzeState) -> AnalyzeState:
+    _log_llm_input("classify_intent", {"prompt": state["prompt"]})
     intent_type = classify_intent(state["prompt"])
+    _log_llm_output("classify_intent", {"intent_type": intent_type})
     state["intent_type"] = intent_type
     emit(state, {"type": "stage", "name": "intent_classified", "intent_type": intent_type})
     return state
 
 
 def handle_conversation(state: AnalyzeState) -> AnalyzeState:
+    _log_llm_input("generate_conversation_reply", {"prompt": state["prompt"]})
     assistant_text = generate_conversation_reply(state["prompt"])
+    _log_llm_output("generate_conversation_reply", {"assistant_text": assistant_text})
     emit(state, {"type": "stage", "name": "assistant_ready", "assistant_text": assistant_text})
 
     response_blocks = [{"type": "text", "content": assistant_text}]
     state["response_blocks"] = response_blocks
     state["assistant_text"] = assistant_text
     state["sql"] = None
-    state["out_columns"] = []
-    state["out_rows"] = []
+    state["result_columns"] = []
+    state["result_rows"] = []
     state["total_count"] = None
     state["chart_intent"] = {"make_chart": False}
-    state["fig"] = None
+    state["chart_config"] = None
     return state
 
 
@@ -119,17 +134,17 @@ def call_llm_with_tools(prompt: str) -> Dict[str, Any]:
     This keeps business logic in service modules and makes LangGraph thin.
     """
     settings = get_settings()
-    base_url = os.environ.get("MCP_BASE_URL", "http://127.0.0.1:8000").strip()
+    base_url = os.environ.get("MCP_BASE_URL", "").strip()
 
     baseline_context: Dict[str, Any] = {
         "prompt": prompt,
         "page_size": DEFAULT_PAGE_SIZE,
         "selected_schema": None,
         "sql": None,
-        "out_columns": [],
-        "out_rows": [],
+        "result_columns": [],
+        "result_rows": [],
         "chart_intent": None,
-        "fig": None,
+        "chart_config": None,
         "total_count": None,
     }
     baseline_state: AnalyzeState = {
@@ -140,31 +155,28 @@ def call_llm_with_tools(prompt: str) -> Dict[str, Any]:
         "latest_turns": None,
         "effective_prompt": None,
         "sql": None,
-        "out_columns": None,
-        "out_rows": None,
+        "result_columns": None,
+        "result_rows": None,
         "total_count": None,
         "chart_intent": None,
-        "fig": None,
+        "chart_config": None,
         "assistant_text": None,
         "response_blocks": None,
-        "chart_only_intent": False,
         "response_source": "llm",
-        "prompt_cache_hit": False,
         "prompt_mentions_chart": False,
         "page_size": DEFAULT_PAGE_SIZE,
         "schema": None,
         "selected_schema": None,
-        "reasoning_plan": None,
-        "last_error_message": "",
+        "sql_plan": None,
+        "error_message": "",
         "attempt": 0,
         "agent_steps": [],
-        "error": None,
         "turn_id": None,
     }
 
     def _exec(skill_name: str, payload: dict[str, Any]) -> dict[str, Any]:
         normalized_payload = normalize_tool_input(skill_name, payload, baseline_context, baseline_state)
-        logger.info("[WORKFLOW] Tool called: %s", skill_name)
+        logger.info("[WORKFLOW] Tool called: skill_name=%s", skill_name)
         try:
             result = execute_skill(skill_name, normalized_payload, base_url=base_url)
             return result
@@ -184,38 +196,38 @@ def call_llm_with_tools(prompt: str) -> Dict[str, Any]:
         "generate_sql",
         {"user_prompt": prompt, "selected_schema": selected_schema},
     )
-    reasoning_plan = sql_result.get("reasoning_plan")
+    sql_plan = sql_result.get("reasoning_plan")
     sql = _exec("validate_sql", {"sql": sql_result.get("sql")}).get("sql")
     baseline_context["sql"] = sql
 
-    out_columns: List[str] = []
-    out_rows: List[Dict[str, Any]] = []
+    result_columns: List[str] = []
+    result_rows: List[Dict[str, Any]] = []
     total_count: Optional[int] = None
     attempt = 0
-    last_error_message = ""
+    error_message = ""
     while attempt <= settings.text_to_sql_max_correction_retries:
         try:
             exe = _exec("execute_sql", {"sql": sql, "max_rows": settings.max_result_rows})
-            out_columns = exe.get("columns") or []
-            out_rows = exe.get("rows") or []
+            result_columns = exe.get("columns") or []
+            result_rows = exe.get("rows") or []
             total_count = exe.get("total_count")
-            baseline_context["out_columns"] = out_columns
-            baseline_context["out_rows"] = out_rows
+            baseline_context["result_columns"] = result_columns
+            baseline_context["result_rows"] = result_rows
             baseline_context["total_count"] = total_count
             break
         except Exception as exc:
-            last_error_message = str(exc)
-            logger.warning("[RETRY] attempt=%s error=%s", attempt + 1, last_error_message)
+            error_message = str(exc)
+            logger.warning("[RETRY] attempt=%s error=%s", attempt + 1, error_message)
             if attempt >= settings.text_to_sql_max_correction_retries:
-                raise ValueError(f"Could not generate executable SQL. Last error: {last_error_message}")
+                raise ValueError(f"Could not generate executable SQL. Last error: {error_message}")
             corrected = _exec(
                 "correct_sql",
                 {
                     "user_prompt": prompt,
                     "selected_schema": selected_schema,
                     "invalid_sql": sql,
-                    "error_message": last_error_message,
-                    "reasoning_plan": reasoning_plan,
+                    "error_message": error_message,
+                    "reasoning_plan": sql_plan,
                 },
             )
             sql = _exec("validate_sql", {"sql": corrected.get("sql")}).get("sql")
@@ -227,25 +239,25 @@ def call_llm_with_tools(prompt: str) -> Dict[str, Any]:
         {
             "user_prompt": prompt,
             "sql": sql,
-            "columns": out_columns,
-            "rows": out_rows,
+            "columns": result_columns,
+            "rows": result_rows,
             "force_chart": False,
         },
     )
     chart_intent = chart.get("chart_intent") or {"make_chart": False}
-    fig = chart.get("fig")
+    chart_config = chart.get("fig")
     baseline_context["chart_intent"] = chart_intent
-    baseline_context["fig"] = fig
+    baseline_context["chart_config"] = chart_config
 
     response = _exec(
         "build_response",
         {
             "prompt": prompt,
             "sql": sql,
-            "columns": out_columns,
-            "rows": out_rows,
+            "columns": result_columns,
+            "rows": result_rows,
             "chart_intent": chart_intent,
-            "fig": fig,
+            "fig": chart_config,
             "total_count": total_count,
             "page_size": DEFAULT_PAGE_SIZE,
         },
@@ -253,17 +265,17 @@ def call_llm_with_tools(prompt: str) -> Dict[str, Any]:
     return {
         "schema": schema,
         "selected_schema": selected_schema,
-        "reasoning_plan": reasoning_plan,
+        "sql_plan": sql_plan,
         "sql": sql,
-        "out_columns": out_columns,
-        "out_rows": out_rows,
+        "result_columns": result_columns,
+        "result_rows": result_rows,
         "total_count": total_count,
         "chart_intent": chart_intent,
-        "fig": fig,
+        "chart_config": chart_config,
         "assistant_text": response.get("assistant_text"),
         "response_blocks": response.get("response_blocks") or [],
         "attempt": attempt,
-        "last_error_message": last_error_message,
+        "error_message": error_message,
     }
 
 
@@ -280,21 +292,21 @@ def _fallback_agent_action(context: Dict[str, Any]) -> tuple[str, dict[str, Any]
         return "generate_chart", {
             "user_prompt": context["prompt"],
             "sql": context["sql"],
-            "columns": context["out_columns"],
-            "rows": context["out_rows"],
+            "columns": context["result_columns"],
+            "rows": context["result_rows"],
             "force_chart": bool(context.get("prompt_mentions_chart")),
         }
     if context.get("chart_intent") is None:
         context["chart_intent"] = {"make_chart": False}
-        context["fig"] = None
+        context["chart_config"] = None
     if context.get("response_blocks") is None:
         return "build_response", {
             "prompt": context["original_prompt"],
             "sql": context["sql"],
-            "columns": context["out_columns"],
-            "rows": context["out_rows"],
+            "columns": context["result_columns"],
+            "rows": context["result_rows"],
             "chart_intent": context["chart_intent"],
-            "fig": context["fig"],
+            "chart_config": context["chart_config"],
             "total_count": context["total_count"],
             "page_size": context["page_size"],
         }
@@ -328,8 +340,8 @@ def normalize_tool_input(
         return {
             "user_prompt": state.get("prompt") or context.get("prompt") or "",
             "sql": context.get("sql"),
-            "columns": context.get("out_columns"),
-            "rows": context.get("out_rows"),
+            "columns": context.get("result_columns"),
+            "rows": context.get("result_rows"),
             "force_chart": True,
         }
 
@@ -337,10 +349,10 @@ def normalize_tool_input(
         return {
             "prompt": state.get("prompt") or context.get("prompt") or "",
             "sql": context.get("sql"),
-            "columns": context.get("out_columns"),
-            "rows": context.get("out_rows"),
+            "columns": context.get("result_columns"),
+            "rows": context.get("result_rows"),
             "chart_intent": context.get("chart_intent"),
-            "fig": context.get("fig"),
+            "fig": context.get("chart_config"),
             "total_count": context.get("total_count"),
             "page_size": context.get("page_size"),
         }
@@ -364,7 +376,7 @@ def normalize_tool_input(
 
 def run_agent_loop(prompt: str, state: AnalyzeState) -> dict[str, Any]:
     settings = get_settings()
-    base_url = os.environ.get("MCP_BASE_URL", "http://127.0.0.1:8000").strip()
+    base_url = os.environ.get("MCP_BASE_URL", "").strip()
     tools = load_tool_specs()
     max_steps = 6
 
@@ -376,29 +388,41 @@ def run_agent_loop(prompt: str, state: AnalyzeState) -> dict[str, Any]:
         "max_result_rows": settings.max_result_rows,
         "schema": None,
         "selected_schema": None,
-        "reasoning_plan": None,
+        "sql_plan": None,
         "sql": None,
         "validated_sql": False,
-        "out_columns": [],
-        "out_rows": [],
+        "result_columns": [],
+        "result_rows": [],
         "total_count": None,
         "chart_intent": None,
-        "fig": None,
+        "chart_config": None,
         "assistant_text": None,
         "response_blocks": None,
         "attempt": 0,
-        "last_error_message": "",
+        "error_message": "",
         "executed": False,
         "chart_attempted": False,
     }
 
     for _ in range(max_steps):
-        decision = generate_agent_step(
-            user_prompt=prompt,
-            tools=tools,
-            steps=state["agent_steps"],
-            max_steps=max_steps,
-        )
+        agent_payload = {
+            "user_prompt": prompt,
+            "tools_count": len(tools),
+            "steps_count": len(state["agent_steps"]),
+            "max_steps": max_steps,
+        }
+        _log_llm_input("generate_agent_step", agent_payload)
+        try:
+            decision = generate_agent_step(
+                user_prompt=prompt,
+                tools=tools,
+                steps=state["agent_steps"],
+                max_steps=max_steps,
+            )
+        except Exception as exc:
+            logger.error("[LLM][ERROR] model=generate_agent_step error=%s", str(exc), exc_info=True)
+            raise
+        _log_llm_output("generate_agent_step", decision)
         thought = str(decision.get("thought") or "").strip()
         action = str(decision.get("action") or "").strip()
         action_input = decision.get("input") if isinstance(decision.get("input"), dict) else {}
@@ -413,11 +437,6 @@ def run_agent_loop(prompt: str, state: AnalyzeState) -> dict[str, Any]:
             thought = thought or "Chart generation already attempted; moving to response assembly."
 
         emit(state, {"type": "agent_thought", "thought": thought})
-        logger.info(
-            "[AGENT] conversation_id=%s action=%s",
-            state.get("conversation_id"),
-            action,
-        )
         emit(state, {"type": "agent_action", "action": action})
 
         if action == "final_answer":
@@ -425,7 +444,7 @@ def run_agent_loop(prompt: str, state: AnalyzeState) -> dict[str, Any]:
             if output.get("sql"):
                 context["sql"] = output.get("sql")
             if isinstance(output.get("data"), list):
-                context["out_rows"] = output.get("data")
+                context["result_rows"] = output.get("data")
             break
 
         observation: Dict[str, Any]
@@ -467,14 +486,14 @@ def run_agent_loop(prompt: str, state: AnalyzeState) -> dict[str, Any]:
             context["selected_schema"] = observation.get("selected_schema")
         elif action == "generate_sql":
             context["sql"] = observation.get("sql")
-            context["reasoning_plan"] = observation.get("reasoning_plan")
+            context["sql_plan"] = observation.get("reasoning_plan")
             context["validated_sql"] = False
         elif action == "validate_sql":
             context["sql"] = observation.get("sql")
             context["validated_sql"] = True
         elif action == "execute_sql":
-            context["out_columns"] = observation.get("columns") or []
-            context["out_rows"] = observation.get("rows") or []
+            context["result_columns"] = observation.get("columns") or []
+            context["result_rows"] = observation.get("rows") or []
             context["total_count"] = observation.get("total_count")
             context["executed"] = True
         elif action == "correct_sql":
@@ -487,7 +506,7 @@ def run_agent_loop(prompt: str, state: AnalyzeState) -> dict[str, Any]:
             if not isinstance(chart_intent, dict):
                 chart_intent = {"make_chart": bool(observation.get("make_chart"))}
             context["chart_intent"] = chart_intent or {"make_chart": False}
-            context["fig"] = observation.get("fig")
+            context["chart_config"] = observation.get("fig")
         elif action == "build_response":
             context["assistant_text"] = observation.get("assistant_text")
             context["response_blocks"] = observation.get("response_blocks") or []
@@ -499,8 +518,8 @@ def run_agent_loop(prompt: str, state: AnalyzeState) -> dict[str, Any]:
             chart_payload = normalize_tool_input("generate_chart", {
                 "user_prompt": prompt,
                 "sql": context["sql"],
-                "columns": context["out_columns"],
-                "rows": context["out_rows"],
+                "columns": context["result_columns"],
+                "rows": context["result_rows"],
                 "force_chart": bool(state["prompt_mentions_chart"]),
             }, context, state)
             logger.info("[WORKFLOW] Tool called: generate_chart")
@@ -514,18 +533,18 @@ def run_agent_loop(prompt: str, state: AnalyzeState) -> dict[str, Any]:
             if not isinstance(chart_intent, dict):
                 chart_intent = {"make_chart": bool(chart.get("make_chart"))}
             context["chart_intent"] = chart_intent or {"make_chart": False}
-            context["fig"] = chart.get("fig")
+            context["chart_config"] = chart.get("fig")
         elif context["chart_intent"] is None:
             context["chart_intent"] = {"make_chart": False}
-            context["fig"] = None
+            context["chart_config"] = None
 
         build_payload = normalize_tool_input("build_response", {
             "prompt": state["prompt"],
             "sql": context["sql"],
-            "columns": context["out_columns"],
-            "rows": context["out_rows"],
+            "columns": context["result_columns"],
+            "rows": context["result_rows"],
             "chart_intent": context["chart_intent"] or {"make_chart": False},
-            "fig": context["fig"],
+            "fig": context["chart_config"],
             "total_count": context["total_count"],
             "page_size": state["page_size"],
         }, context, state)
@@ -541,123 +560,78 @@ def run_agent_loop(prompt: str, state: AnalyzeState) -> dict[str, Any]:
     return {
         "schema": context.get("schema"),
         "selected_schema": context.get("selected_schema"),
-        "reasoning_plan": context.get("reasoning_plan"),
+        "sql_plan": context.get("sql_plan"),
         "sql": context.get("sql"),
-        "out_columns": context.get("out_columns") or [],
-        "out_rows": context.get("out_rows") or [],
+        "result_columns": context.get("result_columns") or [],
+        "result_rows": context.get("result_rows") or [],
         "total_count": context.get("total_count"),
         "chart_intent": context.get("chart_intent") or {"make_chart": False},
-        "fig": context.get("fig"),
+        "chart_config": context.get("chart_config"),
         "assistant_text": context.get("assistant_text"),
         "response_blocks": context.get("response_blocks") or [],
         "attempt": int(context.get("attempt") or 0),
-        "last_error_message": str(context.get("last_error_message") or ""),
+        "error_message": str(context.get("error_message") or ""),
     }
 
 
 def skill_orchestrator(state: AnalyzeState) -> AnalyzeState:
-    settings = get_settings()
-    latest_turn = state["latest_turns"][0] if state["latest_turns"] else None
-    state["last_error_message"] = ""
+    state["error_message"] = ""
     state["attempt"] = 0
+    state["response_source"] = "llm"
+    logger.info("[skill_orchestrator]")
+    emit(state, {"type": "stage", "name": "searching"})
+    try:
+        tool_result = run_agent_loop(state["effective_prompt"] or state["prompt"], state)
+    except Exception as exc:
+        logger.error("[skill_orchestrator][ERROR] error=%s", str(exc), exc_info=True)
+        # Fallback to baseline deterministic flow.
+        tool_result = call_llm_with_tools(state["effective_prompt"] or state["prompt"])
 
-    prompt_cache_turn = None
-    # if settings.reuse_sql_from_history_by_prompt:
-    #     prompt_cache_turn = find_latest_success_by_prompt(engine, state["prompt"])
-    #     state["prompt_cache_hit"] = bool(
-    #         prompt_cache_turn
-    #         and prompt_cache_turn.get("sql")
-    #         and isinstance(prompt_cache_turn.get("columns"), list)
-    #         and isinstance(prompt_cache_turn.get("data"), list)
-    #     )
-    # else:
-    #     state["prompt_cache_hit"] = False
-
-    # state["chart_only_intent"] = is_chart_only_prompt(state["prompt"]) and bool(
-    #     latest_turn
-    #     and latest_turn.get("sql")
-    #     and isinstance(latest_turn.get("columns"), list)
-    #     and isinstance(latest_turn.get("data"), list)
-    # )
-    state["prompt_cache_hit"] = False
-    state["chart_only_intent"] = False
-    if state["chart_only_intent"]:
-        state["sql"] = str(latest_turn.get("sql") or "")
-        state["out_columns"] = latest_turn.get("columns") or []
-        state["out_rows"] = latest_turn.get("data") or []
-        state["total_count"] = latest_turn.get("total_count") or len(state["out_rows"])
-        emit(state, {"type": "stage", "name": "reused_previous_result", "columns": state["out_columns"], "row_count": len(state["out_rows"]), "total_count": state["total_count"], "preview_rows": state["out_rows"][:state["page_size"]], "page": 1, "page_size": state["page_size"]})
-        state["response_source"] = "history_cache" if state["prompt_cache_hit"] else "previous_result"
-    elif state["prompt_cache_hit"] and prompt_cache_turn:
-        state["response_source"] = "history_cache"
-        state["sql"] = normalize_and_validate_sql(str(prompt_cache_turn.get("sql") or ""))
-        emit(state, {"type": "stage", "name": "prompt_cache_hit", "sql": state["sql"]})
-        state["total_count"] = execute_count(engine=engine, base_sql=state["sql"])
-        state["out_columns"], state["out_rows"] = execute_sql(engine=engine, sql=state["sql"], max_rows=settings.max_result_rows)
-        emit(state, {"type": "stage", "name": "query_executed", "sql": state["sql"], "columns": state["out_columns"], "row_count": len(state["out_rows"]), "total_count": state["total_count"], "preview_rows": state["out_rows"][:state["page_size"]], "page": 1, "page_size": state["page_size"]})
-    else:
-        state["response_source"] = "llm"
-        logger.info(
-            "[REQUEST] conversation_id=%s prompt=%s source=llm",
-            state.get("conversation_id"),
-            (state.get("prompt") or "")[:240],
-        )
-        emit(state, {"type": "stage", "name": "searching"})
-        try:
-            tool_result = run_agent_loop(state["effective_prompt"] or state["prompt"], state)
-        except Exception as exc:
-            logger.error(
-                "[ERROR] conversation_id=%s agent_loop_failed=%s",
-                state.get("conversation_id"),
-                str(exc),
-                exc_info=True,
-            )
-            # Fallback to baseline deterministic flow.
-            tool_result = call_llm_with_tools(state["effective_prompt"] or state["prompt"])
-        state["schema"] = tool_result.get("schema")
-        state["selected_schema"] = tool_result.get("selected_schema")
-        if state["selected_schema"]:
-            emit(state, {"type": "stage", "name": "searching_done", "retrieved_tables": list(state["selected_schema"].keys())})
-        state["reasoning_plan"] = tool_result.get("reasoning_plan")
-        if state["reasoning_plan"]:
-            emit(state, {"type": "stage", "name": "planning_done", "sql_generation_reasoning": state["reasoning_plan"]})
-        state["sql"] = tool_result.get("sql")
-        state["out_columns"] = tool_result.get("out_columns") or []
-        state["out_rows"] = tool_result.get("out_rows") or []
-        state["total_count"] = tool_result.get("total_count")
-        state["chart_intent"] = tool_result.get("chart_intent")
-        state["fig"] = tool_result.get("fig")
-        state["assistant_text"] = tool_result.get("assistant_text")
-        state["response_blocks"] = tool_result.get("response_blocks") or []
-        state["attempt"] = int(tool_result.get("attempt") or 0)
-        state["last_error_message"] = str(tool_result.get("last_error_message") or "")
+    state["schema"] = tool_result.get("schema")
+    state["selected_schema"] = tool_result.get("selected_schema")
+    if state["selected_schema"]:
+        emit(state, {"type": "stage", "name": "searching_done", "retrieved_tables": list(state["selected_schema"].keys())})
+    state["sql_plan"] = tool_result.get("sql_plan")
+    if state["sql_plan"]:
+        emit(state, {"type": "stage", "name": "planning_done", "sql_generation_reasoning": state["sql_plan"]})
+    state["sql"] = tool_result.get("sql")
+    state["result_columns"] = tool_result.get("result_columns") or []
+    state["result_rows"] = tool_result.get("result_rows") or []
+    state["total_count"] = tool_result.get("total_count")
+    state["chart_intent"] = tool_result.get("chart_intent")
+    state["chart_config"] = tool_result.get("chart_config")
+    state["assistant_text"] = tool_result.get("assistant_text")
+    state["response_blocks"] = tool_result.get("response_blocks") or []
+    state["attempt"] = int(tool_result.get("attempt") or 0)
+    state["error_message"] = str(tool_result.get("error_message") or "")
 
     if state.get("chart_intent") is None:
         state["chart_intent"] = {"make_chart": False}
     emit(state, {"type": "stage", "name": "chart_intent_ready", "chart_intent": state["chart_intent"]})
-    if state.get("fig"):
-        emit(state, {"type": "stage", "name": "chart_ready", "chart_config": state["fig"]})
+    if state.get("chart_config"):
+        emit(state, {"type": "stage", "name": "chart_ready", "chart_config": state["chart_config"]})
     emit(state, {"type": "stage", "name": "assistant_ready", "assistant_text": state.get("assistant_text")})
     return state
 
 
 def save_turn_node(state: AnalyzeState) -> AnalyzeState:
-    save_turn(
+    turn_id = save_turn(
         engine,
         conversation_id=state["conversation_id"],
         prompt=state["prompt"],
         context_prompt=state["effective_prompt"] if state["effective_prompt"] != state["prompt"] else None,
         sql=state["sql"],
-        columns=state["out_columns"],
-        data=state["out_rows"],
+        columns=state["result_columns"],
+        data=state["result_rows"],
         chart_intent=state["chart_intent"],
-        chart_config=state["fig"],
+        chart_config=state["chart_config"],
         assistant_text=state["assistant_text"],
         response_blocks=state["response_blocks"],
         status="success",
         error=None,
         total_count=state["total_count"],
     )
+    state["turn_id"] = turn_id
     return state
 
 
@@ -704,25 +678,23 @@ def analyze_with_langgraph(
         "latest_turns": None,
         "effective_prompt": None,
         "sql": None,
-        "out_columns": None,
-        "out_rows": None,
+        "result_columns": None,
+        "result_rows": None,
         "total_count": None,
         "chart_intent": None,
-        "fig": None,
+        "chart_config": None,
         "assistant_text": None,
         "response_blocks": None,
-        "chart_only_intent": False,
         "response_source": "llm",
-        "prompt_cache_hit": False,
         "prompt_mentions_chart": False,
         "page_size": DEFAULT_PAGE_SIZE,
         "schema": None,
         "selected_schema": None,
-        "reasoning_plan": None,
-        "last_error_message": "",
+        "sql_plan": None,
+        "error_message": "",
         "attempt": 0,
         "agent_steps": [],
-        "error": None,
+        "turn_id": None,
     }
 
     try:
@@ -734,15 +706,15 @@ def analyze_with_langgraph(
         )
         return {
             "conversation_id": final_state["conversation_id"],
-            "turn_id": "generated",  # Placeholder, since save_turn returns it, but in graph we don't capture
+            "turn_id": final_state.get("turn_id"),
             "prompt": final_state["prompt"],
             "intent_type": final_state["intent_type"],
-            "sql": final_state["sql"] if not final_state["chart_only_intent"] else None,
-            "columns": (final_state["out_columns"] or []) if not final_state["chart_only_intent"] else [],
-            "data": (final_state["out_rows"][:final_state["page_size"]] if final_state["out_rows"] else []) if not final_state["chart_only_intent"] else [],
+            "sql": final_state["sql"],
+            "columns": final_state["result_columns"] or [],
+            "data": final_state["result_rows"][:final_state["page_size"]] if final_state["result_rows"] else [],
             "total_count": final_state["total_count"],
             "chart_intent": final_state["chart_intent"] or {"make_chart": False},
-            "chart_config": final_state["fig"],
+            "chart_config": final_state["chart_config"],
             "assistant_text": final_state["assistant_text"],
             "response_blocks": final_state["response_blocks"] or [],
             "status": "success",
