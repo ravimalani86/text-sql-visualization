@@ -9,6 +9,7 @@ from typing import Any, Dict, Literal, Optional
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 
+from app.api.ask_status import AskStatus, DEFAULT_STAGE_STATUS, STAGE_TO_STATUS
 from app.langgraph.service import analyze_with_langgraph
 
 
@@ -16,7 +17,7 @@ router = APIRouter(tags=["asks"])
 
 
 class StatusHistoryItem(BaseModel):
-    status: str
+    status: AskStatus
     ts: float
     stage: Optional[str] = None
 
@@ -28,27 +29,16 @@ class AskResultError(BaseModel):
 
 class AskResultResponse(BaseModel):
     query_id: str
-    status: Literal[
-        "understanding",
-        "searching",
-        "planning",
-        "generating",
-        "correcting",
-        "finished",
-        "failed",
-        "stopped",
-    ]
+    status: AskStatus
     conversation_id: Optional[str] = None
+    turn_id: Optional[str] = None
+    prompt: Optional[str] = None
+    intent_type: Optional[str] = None
     sql: Optional[str] = None
-    columns: list[str] = Field(default_factory=list)
-    preview_rows: list[dict[str, Any]] = Field(default_factory=list)
-    total_count: Optional[int] = None
-    chart_intent: Optional[dict[str, Any]] = None
-    chart_config: Optional[dict[str, Any]] = None
+    table: dict[str, Any] = Field(default_factory=lambda: {"columns": [], "data": [], "total_count": None})
+    chart: dict[str, Any] = Field(default_factory=lambda: {"chart_intent": None, "chart_config": None})
     assistant_text: Optional[str] = None
-    retrieved_tables: list[str] = Field(default_factory=list)
-    sql_generation_reasoning: Optional[str] = None
-    result: Optional[dict[str, Any]] = None
+    source: Optional[str] = None
     error: Optional[AskResultError] = None
     status_history: list[StatusHistoryItem] = Field(default_factory=list)
     created_at: str
@@ -81,26 +71,8 @@ def _cleanup_expired_jobs() -> None:
             _ASK_JOBS.pop(query_id, None)
 
 
-def _stage_to_status(stage_name: str) -> str:
-    mapping = {
-        "intent_classified": "understanding",
-        "searching": "searching",
-        "searching_done": "searching",
-        "planning": "planning",
-        "planning_done": "planning",
-        "generating": "generating",
-        "sql_generated": "generating",
-        "correcting": "correcting",
-        "query_executed": "generating",
-        "reused_previous_result": "searching",
-        "prompt_cache_hit": "searching",
-        "chart_intent_ready": "generating",
-        "chart_intent_reused": "generating",
-        "chart_reused": "generating",
-        "chart_ready": "generating",
-        "assistant_ready": "generating",
-    }
-    return mapping.get(stage_name, "generating")
+def _stage_to_status(stage_name: str) -> AskStatus:
+    return STAGE_TO_STATUS.get(stage_name, DEFAULT_STAGE_STATUS)
 
 
 def _new_job(*, query_id: str, query: str, conversation_id: Optional[str]) -> AskJobState:
@@ -109,18 +81,16 @@ def _new_job(*, query_id: str, query: str, conversation_id: Optional[str]) -> As
         query_id=query_id,
         query=query,
         conversation_id=conversation_id,
-        status="understanding",
-        status_history=[StatusHistoryItem(status="understanding", stage="created", ts=now)],
+        status=AskStatus.UNDERSTANDING,
+        status_history=[StatusHistoryItem(status=AskStatus.UNDERSTANDING, stage="created", ts=now)],
+        turn_id=None,
+        prompt=query,
+        intent_type=None,
         sql=None,
-        columns=[],
-        preview_rows=[],
-        total_count=None,
-        chart_intent=None,
-        chart_config=None,
+        table={"columns": [], "data": [], "total_count": None},
+        chart={"chart_intent": None, "chart_config": None},
         assistant_text=None,
-        retrieved_tables=[],
-        sql_generation_reasoning=None,
-        result=None,
+        source=None,
         error=None,
         stop_requested=False,
         created_at=datetime.utcnow().isoformat(),
@@ -135,10 +105,10 @@ def _update_job(query_id: str, **updates: Any) -> None:
             return
         for key, value in updates.items():
             setattr(job, key, value)
-        status_name = str(updates.get("status") or "").strip()
-        if status_name:
+        status_value = updates.get("status")
+        if isinstance(status_value, AskStatus):
             last_stage = job.status_history[-1].stage if job.status_history else None
-            job.status_history.append(StatusHistoryItem(status=status_name, stage=last_stage, ts=_now_ts()))
+            job.status_history.append(StatusHistoryItem(status=status_value, stage=last_stage, ts=_now_ts()))
         job.updated_at = _now_ts()
 
 
@@ -149,6 +119,39 @@ def _get_job(query_id: str) -> AskJobState:
             raise HTTPException(status_code=404, detail="Query not found")
         return job
 
+
+def _append_status(job: AskJobState, *, status: AskStatus, stage: Optional[str], ts: float) -> None:
+    job.status = status
+    job.status_history.append(StatusHistoryItem(stage=stage, status=status, ts=ts))
+
+
+def _apply_stage_payload(job: AskJobState, stage_name: str, payload: Dict[str, Any]) -> None:
+    if stage_name in ("sql_generated", "prompt_cache_hit") and payload.get("sql"):
+        job.sql = payload.get("sql")
+
+    if stage_name in ("query_executed", "reused_previous_result"):
+        columns = payload.get("columns")
+        preview_rows = payload.get("preview_rows")
+        total_count = payload.get("total_count")
+        if isinstance(columns, list):
+            job.table["columns"] = columns
+        if isinstance(preview_rows, list):
+            job.table["data"] = preview_rows
+        if total_count is not None:
+            job.table["total_count"] = total_count
+
+    if stage_name in ("chart_intent_ready", "chart_intent_reused"):
+        chart_intent = payload.get("chart_intent")
+        if isinstance(chart_intent, dict):
+            job.chart["chart_intent"] = chart_intent
+
+    if stage_name in ("chart_ready", "chart_reused"):
+        chart_config = payload.get("chart_config")
+        if isinstance(chart_config, dict):
+            job.chart["chart_config"] = chart_config
+
+    if stage_name == "assistant_ready" and payload.get("assistant_text"):
+        job.assistant_text = payload.get("assistant_text")
 
 def _handle_emit(query_id: str, payload: Dict[str, Any]) -> None:
     with _ASK_JOBS_LOCK:
@@ -166,34 +169,12 @@ def _handle_emit(query_id: str, payload: Dict[str, Any]) -> None:
         if payload.get("type") != "stage":
             return
 
+        now = _now_ts()
         stage_name = str(payload.get("name") or "").strip()
         status_name = _stage_to_status(stage_name)
-        job.status = status_name
-        job.status_history.append(StatusHistoryItem(stage=stage_name, status=status_name, ts=_now_ts()))
-
-        if stage_name in ("sql_generated", "prompt_cache_hit") and payload.get("sql"):
-            job.sql = payload.get("sql")
-        if stage_name in ("query_executed", "reused_previous_result"):
-            if isinstance(payload.get("columns"), list):
-                job.columns = payload.get("columns")
-            if isinstance(payload.get("preview_rows"), list):
-                job.preview_rows = payload.get("preview_rows")
-            if payload.get("total_count") is not None:
-                job.total_count = payload.get("total_count")
-        if stage_name in ("chart_intent_ready", "chart_intent_reused") and isinstance(
-            payload.get("chart_intent"), dict
-        ):
-            job.chart_intent = payload.get("chart_intent")
-        if stage_name in ("chart_ready", "chart_reused"):
-            if isinstance(payload.get("chart_config"), dict):
-                job.chart_config = payload.get("chart_config")
-        if stage_name == "assistant_ready" and payload.get("assistant_text"):
-            job.assistant_text = payload.get("assistant_text")
-        if stage_name == "searching_done" and isinstance(payload.get("retrieved_tables"), list):
-            job.retrieved_tables = payload.get("retrieved_tables")
-        if stage_name == "planning_done" and payload.get("sql_generation_reasoning"):
-            job.sql_generation_reasoning = payload.get("sql_generation_reasoning")
-        job.updated_at = _now_ts()
+        _append_status(job, status=status_name, stage=stage_name, ts=now)
+        _apply_stage_payload(job, stage_name, payload)
+        job.updated_at = now
 
 
 def _run_ask_job(query_id: str, query: str, conversation_id: Optional[str]) -> None:
@@ -208,24 +189,38 @@ def _run_ask_job(query_id: str, query: str, conversation_id: Optional[str]) -> N
             if not job:
                 return
             if job.stop_requested:
-                job.status = "stopped"
+                job.status = AskStatus.STOPPED
                 job.updated_at = _now_ts()
                 return
-            job.status = "finished"
-            job.status_history.append(StatusHistoryItem(stage="finished", status="finished", ts=_now_ts()))
+            job.status = AskStatus.FINISHED
+            job.status_history.append(StatusHistoryItem(stage="finished", status=AskStatus.FINISHED, ts=_now_ts()))
             job.conversation_id = final_result.get("conversation_id") or job.conversation_id
-            job.result = final_result
+            job.turn_id = final_result.get("turn_id")
+            job.prompt = final_result.get("prompt")
+            job.intent_type = final_result.get("intent_type")
+            job.sql = final_result.get("sql")
+            job.table = {
+                "columns": list(final_result.get("columns") or []),
+                "data": list(final_result.get("data") or []),
+                "total_count": final_result.get("total_count"),
+            }
+            job.chart = {
+                "chart_intent": final_result.get("chart_intent"),
+                "chart_config": final_result.get("chart_config"),
+            }
+            job.assistant_text = final_result.get("assistant_text")
+            job.source = final_result.get("source")
             job.updated_at = _now_ts()
     except HTTPException as exc:
         _update_job(
             query_id,
-            status="failed",
+            status=AskStatus.FAILED,
             error=AskResultError(code="HTTP_ERROR", message=str(exc.detail)),
         )
     except Exception as exc:
         _update_job(
             query_id,
-            status="failed",
+            status=AskStatus.FAILED,
             error=AskResultError(code="OTHERS", message=str(exc)),
         )
 
@@ -240,7 +235,7 @@ class AskResponse(BaseModel):
 
 
 class StopAskRequest(BaseModel):
-    status: Literal["stopped"] = "stopped"
+    status: Literal["stopped"] = AskStatus.STOPPED.value
 
 
 class StopAskResponse(BaseModel):
@@ -279,8 +274,8 @@ async def stop_ask(query_id: str, _: StopAskRequest) -> StopAskResponse:
         if not job:
             raise HTTPException(status_code=404, detail="Query not found")
         job.stop_requested = True
-        job.status = "stopped"
+        job.status = AskStatus.STOPPED
         job.error = AskResultError(code="STOPPED", message="Stopped by user")
-        job.status_history.append(StatusHistoryItem(stage="stopped", status="stopped", ts=_now_ts()))
+        job.status_history.append(StatusHistoryItem(stage="stopped", status=AskStatus.STOPPED, ts=_now_ts()))
         job.updated_at = _now_ts()
     return StopAskResponse(query_id=query_id)

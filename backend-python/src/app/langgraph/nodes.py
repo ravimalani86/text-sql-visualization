@@ -5,6 +5,15 @@ from app.core.config import DEFAULT_PAGE_SIZE, get_settings
 from app.db.engine import engine
 from app.langgraph.agent_orchestrator import call_llm_with_tools, run_agent_loop
 from app.langgraph.logging_utils import log_llm_input, log_llm_output
+from app.langgraph.stages import (
+    STAGE_ASSISTANT_READY,
+    STAGE_CHART_INTENT_READY,
+    STAGE_CHART_READY,
+    STAGE_INTENT_CLASSIFIED,
+    STAGE_PLANNING_DONE,
+    STAGE_SEARCHING,
+    STAGE_SEARCHING_DONE,
+)
 from app.langgraph.types import AnalyzeState
 from app.repositories.history_repo import (
     conversation_exists,
@@ -59,7 +68,7 @@ def classify_intent_node(state: AnalyzeState) -> AnalyzeState:
     intent_type = classify_intent(state["prompt"])
     log_llm_output("classify_intent", {"intent_type": intent_type})
     state["intent_type"] = intent_type
-    emit(state, {"type": "stage", "name": "intent_classified", "intent_type": intent_type})
+    emit(state, {"type": "stage", "name": STAGE_INTENT_CLASSIFIED, "intent_type": intent_type})
     return state
 
 
@@ -67,7 +76,7 @@ def handle_conversation(state: AnalyzeState) -> AnalyzeState:
     log_llm_input("generate_conversation_reply", {"prompt": state["prompt"]})
     assistant_text = generate_conversation_reply(state["prompt"])
     log_llm_output("generate_conversation_reply", {"assistant_text": assistant_text})
-    emit(state, {"type": "stage", "name": "assistant_ready", "assistant_text": assistant_text})
+    emit(state, {"type": "stage", "name": STAGE_ASSISTANT_READY, "assistant_text": assistant_text})
 
     response_blocks = [{"type": "text", "content": assistant_text}]
     state["response_blocks"] = response_blocks
@@ -86,7 +95,7 @@ def skill_orchestrator(state: AnalyzeState) -> AnalyzeState:
     state["attempt"] = 0
     state["response_source"] = "llm"
     logger.info("[skill_orchestrator]")
-    emit(state, {"type": "stage", "name": "searching"})
+    emit(state, {"type": "stage", "name": STAGE_SEARCHING})
     try:
         tool_result = run_agent_loop(state["effective_prompt"] or state["prompt"], state)
     except Exception as exc:
@@ -96,10 +105,10 @@ def skill_orchestrator(state: AnalyzeState) -> AnalyzeState:
     state["schema"] = tool_result.get("schema")
     state["selected_schema"] = tool_result.get("selected_schema")
     if state["selected_schema"]:
-        emit(state, {"type": "stage", "name": "searching_done", "retrieved_tables": list(state["selected_schema"].keys())})
+        emit(state, {"type": "stage", "name": STAGE_SEARCHING_DONE, "retrieved_tables": list(state["selected_schema"].keys())})
     state["sql_plan"] = tool_result.get("sql_plan")
     if state["sql_plan"]:
-        emit(state, {"type": "stage", "name": "planning_done", "sql_generation_reasoning": state["sql_plan"]})
+        emit(state, {"type": "stage", "name": STAGE_PLANNING_DONE, "sql_generation_reasoning": state["sql_plan"]})
     state["sql"] = tool_result.get("sql")
     state["result_columns"] = tool_result.get("result_columns") or []
     state["result_rows"] = tool_result.get("result_rows") or []
@@ -113,10 +122,10 @@ def skill_orchestrator(state: AnalyzeState) -> AnalyzeState:
 
     if state.get("chart_intent") is None:
         state["chart_intent"] = {"make_chart": False}
-    emit(state, {"type": "stage", "name": "chart_intent_ready", "chart_intent": state["chart_intent"]})
+    emit(state, {"type": "stage", "name": STAGE_CHART_INTENT_READY, "chart_intent": state["chart_intent"]})
     if state.get("chart_config"):
-        emit(state, {"type": "stage", "name": "chart_ready", "chart_config": state["chart_config"]})
-    emit(state, {"type": "stage", "name": "assistant_ready", "assistant_text": state.get("assistant_text")})
+        emit(state, {"type": "stage", "name": STAGE_CHART_READY, "chart_config": state["chart_config"]})
+    emit(state, {"type": "stage", "name": STAGE_ASSISTANT_READY, "assistant_text": state.get("assistant_text")})
     return state
 
 

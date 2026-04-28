@@ -841,53 +841,18 @@
             const withoutStatusBlocks = (blocks) => (
                 Array.isArray(blocks) ? blocks.filter((b) => !(b && b.type === 'status')) : []
             );
-            const statusLabelByName = {
-                understanding: 'Understanding request',
-                searching: 'Searching relevant schema',
-                planning: 'Planning SQL',
-                generating: 'Generating SQL and results',
-                correcting: 'Correcting SQL',
-                finished: 'Finalizing response',
-                failed: 'Failed',
-                stopped: 'Stopped',
-            };
-            const progressStatuses = ['understanding', 'searching', 'planning', 'generating', 'correcting', 'finished'];
-            const progressLabels = {
-                understanding: 'understanding',
-                searching: 'searching',
-                planning: 'planning',
-                generating: 'generating',
-                correcting: 'correcting',
-                finished: 'finished',
-            };
-            let seenProgressStatuses = [];
-            const terminalStatuses = new Set(['finished', 'failed', 'stopped']);
-
-            const buildProgressStatusText = (status) => {
-                if (!progressStatuses.includes(status)) {
-                    return statusLabelByName[status] || `Processing: ${String(status || 'working')}`;
-                }
-                if (!seenProgressStatuses.includes(status)) {
-                    seenProgressStatuses.push(status);
-                }
-                return seenProgressStatuses.map((step, idx) => {
-                    const isLast = idx === seenProgressStatuses.length - 1;
-                    const isDone = !isLast || terminalStatuses.has(status);
-                    return `${progressLabels[step]}...${isDone ? 'done' : ''}`;
-                }).join('\n');
-            };
 
             const mapFinalTurn = (data) => ({
                 id: data.turn_id,
                 prompt: data.prompt,
                 sql: data.sql,
-                columns: Array.isArray(data.columns) ? data.columns : [],
-                data: Array.isArray(data.data) ? data.data : [],
-                total_count: data.total_count || null,
-                chart_intent: data.chart_intent || null,
-                chart_config: data.chart_config || null,
+                columns: Array.isArray(data.table && data.table.columns) ? data.table.columns : [],
+                data: Array.isArray(data.table && data.table.data) ? data.table.data : [],
+                total_count: (data.table && data.table.total_count) || null,
+                chart_intent: (data.chart && data.chart.chart_intent) || null,
+                chart_config: (data.chart && data.chart.chart_config) || null,
                 assistant_text: data.assistant_text || '',
-                response_blocks: Array.isArray(data.response_blocks) ? data.response_blocks : [],
+                response_blocks: [],
                 status: data.status || 'success',
                 error: null,
                 created_at: data.created_at || null,
@@ -914,20 +879,7 @@
                     state.conversationId = result.conversation_id;
                 }
 
-                if (Array.isArray(result.status_history) && result.status_history.length) {
-                    const statusSequence = result.status_history
-                        .map((item) => item && item.status)
-                        .filter((status) => progressStatuses.includes(status));
-                    const uniqueSequence = [];
-                    for (const status of statusSequence) {
-                        if (!uniqueSequence.includes(status)) {
-                            uniqueSequence.push(status);
-                        }
-                    }
-                    seenProgressStatuses = uniqueSequence;
-                }
-
-                const statusText = buildProgressStatusText(result.status);
+                const statusText = String(result.status || 'Working');
                 upsertBlock('status', { type: 'status', content: statusText, showDots: false });
 
                 if (result.sql) {
@@ -935,10 +887,11 @@
                     upsertBlock('sql', { type: 'sql', sql: result.sql });
                 }
 
-                const cols = Array.isArray(result.columns) ? result.columns : [];
-                const rows = Array.isArray(result.preview_rows) ? result.preview_rows : [];
+                const table = result.table && typeof result.table === 'object' ? result.table : {};
+                const cols = Array.isArray(table.columns) ? table.columns : [];
+                const rows = Array.isArray(table.data) ? table.data : [];
                 if (cols.length) {
-                    const totalCount = typeof result.total_count === 'number' ? result.total_count : rows.length;
+                    const totalCount = typeof table.total_count === 'number' ? table.total_count : rows.length;
                     turn.columns = cols;
                     turn.data = rows;
                     turn.total_count = totalCount;
@@ -957,10 +910,11 @@
                     });
                 }
 
-                if (result.chart_intent) {
-                    turn.chart_intent = result.chart_intent;
+                const chart = result.chart && typeof result.chart === 'object' ? result.chart : {};
+                if (chart.chart_intent) {
+                    turn.chart_intent = chart.chart_intent;
                 }
-                const chartCfg = result.chart_config;
+                const chartCfg = chart.chart_config;
                 if (chartCfg) {
                     turn.chart_config = chartCfg;
                     upsertBlock('chart', {
@@ -974,7 +928,7 @@
                 }
                 renderConversation();
 
-                if (result.status === 'finished' && result.result) {
+                if (result.status === 'finished') {
                     const prevBlocks = Array.isArray(turn.response_blocks) ? [...turn.response_blocks] : [];
                     const prevColumns = Array.isArray(turn.columns) ? [...turn.columns] : [];
                     const prevRows = Array.isArray(turn.data) ? [...turn.data] : [];
@@ -983,7 +937,7 @@
                     const prevChartIntent = turn.chart_intent;
                     const prevChartConfig = turn.chart_config;
                     const prevAssistantText = turn.assistant_text;
-                    const finalTurn = mapFinalTurn(result.result);
+                    const finalTurn = mapFinalTurn(result);
                     const hasFinalBlocks = Array.isArray(finalTurn.response_blocks) && finalTurn.response_blocks.length > 0;
                     Object.assign(turn, finalTurn);
                     if (!hasFinalBlocks && prevBlocks.length) {
