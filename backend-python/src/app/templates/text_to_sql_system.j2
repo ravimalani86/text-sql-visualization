@@ -13,10 +13,13 @@ Return ONLY one PostgreSQL query.
 Rules:
 - Use only tables/columns from schema
 - PostgreSQL syntax only
+- Avoid SELECT *
 - SELECT or WITH only
+- For any aggregation or arithmetic result (SUM, COUNT, AVG, calculations), always return values rounded to 2 decimal places
+- Format all date outputs as YYYY-MM-DD
+- Do not include primary or foreign key ID columns in the SELECT output unless explicitly required
 - Single statement only
-- No comments, no markdown, no explanations, no code fences
 - Use snake_case aliases
 - Do NOT add LIMIT or OFFSET — the system handles pagination automatically
 - Do not guess missing fields
-- Avoid SELECT *
+- No comments, no markdown, no explanations, no code fences

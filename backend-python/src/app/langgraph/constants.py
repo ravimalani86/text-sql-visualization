@@ -1,0 +1,13 @@
+LLM_LOG_MAX_CHARS = 4000
+MAX_AGENT_STEPS = 6
+
+ACTION_GET_SCHEMA = "get_schema"
+ACTION_GENERATE_SQL = "generate_sql"
+ACTION_VALIDATE_SQL = "validate_sql"
+ACTION_EXECUTE_SQL = "execute_sql"
+ACTION_CORRECT_SQL = "correct_sql"
+ACTION_GENERATE_CHART = "generate_chart"
+ACTION_BUILD_RESPONSE = "build_response"
+ACTION_FINAL_ANSWER = "final_answer"
+
+INTENT_CONVERSATION = "CONVERSATION"

@@ -9,12 +9,58 @@ from typing import Any, Dict, Literal, Optional
 from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
 
-from app.langgraph_analyzer import analyze_with_langgraph
+from app.langgraph.service import analyze_with_langgraph
 
 
 router = APIRouter(tags=["asks"])
 
-_ASK_JOBS: Dict[str, Dict[str, Any]] = {}
+
+class StatusHistoryItem(BaseModel):
+    status: str
+    ts: float
+    stage: Optional[str] = None
+
+
+class AskResultError(BaseModel):
+    code: Literal["HTTP_ERROR", "OTHERS", "STOPPED"]
+    message: str
+
+
+class AskResultResponse(BaseModel):
+    query_id: str
+    status: Literal[
+        "understanding",
+        "searching",
+        "planning",
+        "generating",
+        "correcting",
+        "finished",
+        "failed",
+        "stopped",
+    ]
+    conversation_id: Optional[str] = None
+    sql: Optional[str] = None
+    columns: list[str] = Field(default_factory=list)
+    preview_rows: list[dict[str, Any]] = Field(default_factory=list)
+    total_count: Optional[int] = None
+    chart_intent: Optional[dict[str, Any]] = None
+    chart_config: Optional[dict[str, Any]] = None
+    assistant_text: Optional[str] = None
+    retrieved_tables: list[str] = Field(default_factory=list)
+    sql_generation_reasoning: Optional[str] = None
+    result: Optional[dict[str, Any]] = None
+    error: Optional[AskResultError] = None
+    status_history: list[StatusHistoryItem] = Field(default_factory=list)
+    created_at: str
+    updated_at: float
+
+
+class AskJobState(AskResultResponse):
+    query: str
+    stop_requested: bool = False
+
+
+_ASK_JOBS: Dict[str, AskJobState] = {}
 _ASK_JOBS_LOCK = threading.Lock()
 _ASK_JOB_TTL_SECONDS = 60 * 30
 
@@ -28,7 +74,7 @@ def _cleanup_expired_jobs() -> None:
     expired: list[str] = []
     with _ASK_JOBS_LOCK:
         for query_id, job in _ASK_JOBS.items():
-            updated_at = float(job.get("updated_at", 0))
+            updated_at = float(job.updated_at)
             if now - updated_at > _ASK_JOB_TTL_SECONDS:
                 expired.append(query_id)
         for query_id in expired:
@@ -57,28 +103,29 @@ def _stage_to_status(stage_name: str) -> str:
     return mapping.get(stage_name, "generating")
 
 
-def _new_job(*, query_id: str, query: str, conversation_id: Optional[str]) -> Dict[str, Any]:
-    return {
-        "query_id": query_id,
-        "query": query,
-        "conversation_id": conversation_id,
-        "status": "understanding",
-        "stage": "created",
-        "sql": None,
-        "columns": [],
-        "preview_rows": [],
-        "total_count": None,
-        "chart_intent": None,
-        "chart_config": None,
-        "assistant_text": None,
-        "retrieved_tables": [],
-        "sql_generation_reasoning": None,
-        "result": None,
-        "error": None,
-        "stop_requested": False,
-        "created_at": datetime.utcnow().isoformat(),
-        "updated_at": _now_ts(),
-    }
+def _new_job(*, query_id: str, query: str, conversation_id: Optional[str]) -> AskJobState:
+    now = _now_ts()
+    return AskJobState(
+        query_id=query_id,
+        query=query,
+        conversation_id=conversation_id,
+        status="understanding",
+        status_history=[StatusHistoryItem(status="understanding", stage="created", ts=now)],
+        sql=None,
+        columns=[],
+        preview_rows=[],
+        total_count=None,
+        chart_intent=None,
+        chart_config=None,
+        assistant_text=None,
+        retrieved_tables=[],
+        sql_generation_reasoning=None,
+        result=None,
+        error=None,
+        stop_requested=False,
+        created_at=datetime.utcnow().isoformat(),
+        updated_at=now,
+    )
 
 
 def _update_job(query_id: str, **updates: Any) -> None:
@@ -86,16 +133,21 @@ def _update_job(query_id: str, **updates: Any) -> None:
         job = _ASK_JOBS.get(query_id)
         if not job:
             return
-        job.update(updates)
-        job["updated_at"] = _now_ts()
+        for key, value in updates.items():
+            setattr(job, key, value)
+        status_name = str(updates.get("status") or "").strip()
+        if status_name:
+            last_stage = job.status_history[-1].stage if job.status_history else None
+            job.status_history.append(StatusHistoryItem(status=status_name, stage=last_stage, ts=_now_ts()))
+        job.updated_at = _now_ts()
 
 
-def _get_job(query_id: str) -> Dict[str, Any]:
+def _get_job(query_id: str) -> AskJobState:
     with _ASK_JOBS_LOCK:
         job = _ASK_JOBS.get(query_id)
         if not job:
             raise HTTPException(status_code=404, detail="Query not found")
-        return dict(job)
+        return job
 
 
 def _handle_emit(query_id: str, payload: Dict[str, Any]) -> None:
@@ -103,44 +155,45 @@ def _handle_emit(query_id: str, payload: Dict[str, Any]) -> None:
         job = _ASK_JOBS.get(query_id)
         if not job:
             return
-        if job.get("stop_requested"):
+        if job.stop_requested:
             return
 
         if payload.get("type") == "meta":
-            job["conversation_id"] = payload.get("conversation_id") or job.get("conversation_id")
-            job["updated_at"] = _now_ts()
+            job.conversation_id = payload.get("conversation_id") or job.conversation_id
+            job.updated_at = _now_ts()
             return
 
         if payload.get("type") != "stage":
             return
 
         stage_name = str(payload.get("name") or "").strip()
-        job["stage"] = stage_name
-        job["status"] = _stage_to_status(stage_name)
+        status_name = _stage_to_status(stage_name)
+        job.status = status_name
+        job.status_history.append(StatusHistoryItem(stage=stage_name, status=status_name, ts=_now_ts()))
 
         if stage_name in ("sql_generated", "prompt_cache_hit") and payload.get("sql"):
-            job["sql"] = payload.get("sql")
+            job.sql = payload.get("sql")
         if stage_name in ("query_executed", "reused_previous_result"):
             if isinstance(payload.get("columns"), list):
-                job["columns"] = payload.get("columns")
+                job.columns = payload.get("columns")
             if isinstance(payload.get("preview_rows"), list):
-                job["preview_rows"] = payload.get("preview_rows")
+                job.preview_rows = payload.get("preview_rows")
             if payload.get("total_count") is not None:
-                job["total_count"] = payload.get("total_count")
+                job.total_count = payload.get("total_count")
         if stage_name in ("chart_intent_ready", "chart_intent_reused") and isinstance(
             payload.get("chart_intent"), dict
         ):
-            job["chart_intent"] = payload.get("chart_intent")
+            job.chart_intent = payload.get("chart_intent")
         if stage_name in ("chart_ready", "chart_reused"):
             if isinstance(payload.get("chart_config"), dict):
-                job["chart_config"] = payload.get("chart_config")
+                job.chart_config = payload.get("chart_config")
         if stage_name == "assistant_ready" and payload.get("assistant_text"):
-            job["assistant_text"] = payload.get("assistant_text")
+            job.assistant_text = payload.get("assistant_text")
         if stage_name == "searching_done" and isinstance(payload.get("retrieved_tables"), list):
-            job["retrieved_tables"] = payload.get("retrieved_tables")
+            job.retrieved_tables = payload.get("retrieved_tables")
         if stage_name == "planning_done" and payload.get("sql_generation_reasoning"):
-            job["sql_generation_reasoning"] = payload.get("sql_generation_reasoning")
-        job["updated_at"] = _now_ts()
+            job.sql_generation_reasoning = payload.get("sql_generation_reasoning")
+        job.updated_at = _now_ts()
 
 
 def _run_ask_job(query_id: str, query: str, conversation_id: Optional[str]) -> None:
@@ -154,29 +207,26 @@ def _run_ask_job(query_id: str, query: str, conversation_id: Optional[str]) -> N
             job = _ASK_JOBS.get(query_id)
             if not job:
                 return
-            if job.get("stop_requested"):
-                job["status"] = "stopped"
-                job["stage"] = "stopped"
-                job["updated_at"] = _now_ts()
+            if job.stop_requested:
+                job.status = "stopped"
+                job.updated_at = _now_ts()
                 return
-            job["status"] = "finished"
-            job["stage"] = "finished"
-            job["conversation_id"] = final_result.get("conversation_id") or job.get("conversation_id")
-            job["result"] = final_result
-            job["updated_at"] = _now_ts()
+            job.status = "finished"
+            job.status_history.append(StatusHistoryItem(stage="finished", status="finished", ts=_now_ts()))
+            job.conversation_id = final_result.get("conversation_id") or job.conversation_id
+            job.result = final_result
+            job.updated_at = _now_ts()
     except HTTPException as exc:
         _update_job(
             query_id,
             status="failed",
-            stage="failed",
-            error={"code": "HTTP_ERROR", "message": str(exc.detail)},
+            error=AskResultError(code="HTTP_ERROR", message=str(exc.detail)),
         )
     except Exception as exc:
         _update_job(
             query_id,
             status="failed",
-            stage="failed",
-            error={"code": "OTHERS", "message": str(exc)},
+            error=AskResultError(code="OTHERS", message=str(exc)),
         )
 
 
@@ -195,40 +245,6 @@ class StopAskRequest(BaseModel):
 
 class StopAskResponse(BaseModel):
     query_id: str
-
-
-class AskResultError(BaseModel):
-    code: Literal["HTTP_ERROR", "OTHERS", "STOPPED"]
-    message: str
-
-
-class AskResultResponse(BaseModel):
-    query_id: str
-    status: Literal[
-        "understanding",
-        "searching",
-        "planning",
-        "generating",
-        "correcting",
-        "finished",
-        "failed",
-        "stopped",
-    ]
-    stage: str
-    conversation_id: Optional[str] = None
-    sql: Optional[str] = None
-    columns: list[str] = Field(default_factory=list)
-    preview_rows: list[dict[str, Any]] = Field(default_factory=list)
-    total_count: Optional[int] = None
-    chart_intent: Optional[dict[str, Any]] = None
-    chart_config: Optional[dict[str, Any]] = None
-    assistant_text: Optional[str] = None
-    retrieved_tables: list[str] = Field(default_factory=list)
-    sql_generation_reasoning: Optional[str] = None
-    result: Optional[dict[str, Any]] = None
-    error: Optional[AskResultError] = None
-    created_at: str
-    updated_at: float
 
 
 @router.post("/v1/asks", response_model=AskResponse)
@@ -251,34 +267,8 @@ async def create_ask(payload: AskRequest, background_tasks: BackgroundTasks) -> 
 async def get_ask_result(query_id: str) -> AskResultResponse:
     _cleanup_expired_jobs()
     job = _get_job(query_id)
-    err = job.get("error")
-    error_obj = None
-    if isinstance(err, dict):
-        code = str(err.get("code") or "OTHERS")
-        message = str(err.get("message") or "Unknown error")
-        if code not in {"HTTP_ERROR", "OTHERS", "STOPPED"}:
-            code = "OTHERS"
-        error_obj = AskResultError(code=code, message=message)
-
-    return AskResultResponse(
-        query_id=query_id,
-        status=str(job.get("status") or "failed"),
-        stage=str(job.get("stage") or "failed"),
-        conversation_id=job.get("conversation_id"),
-        sql=job.get("sql"),
-        columns=list(job.get("columns") or []),
-        preview_rows=list(job.get("preview_rows") or []),
-        total_count=job.get("total_count"),
-        chart_intent=job.get("chart_intent"),
-        chart_config=job.get("chart_config"),
-        assistant_text=job.get("assistant_text"),
-        retrieved_tables=list(job.get("retrieved_tables") or []),
-        sql_generation_reasoning=job.get("sql_generation_reasoning"),
-        result=job.get("result"),
-        error=error_obj,
-        created_at=str(job.get("created_at")),
-        updated_at=float(job.get("updated_at") or _now_ts()),
-    )
+    payload = job.model_dump(exclude={"query", "stop_requested"})
+    return AskResultResponse(**payload)
 
 
 @router.patch("/v1/asks/{query_id}", response_model=StopAskResponse)
@@ -288,9 +278,9 @@ async def stop_ask(query_id: str, _: StopAskRequest) -> StopAskResponse:
         job = _ASK_JOBS.get(query_id)
         if not job:
             raise HTTPException(status_code=404, detail="Query not found")
-        job["stop_requested"] = True
-        job["status"] = "stopped"
-        job["stage"] = "stopped"
-        job["error"] = {"code": "STOPPED", "message": "Stopped by user"}
-        job["updated_at"] = _now_ts()
+        job.stop_requested = True
+        job.status = "stopped"
+        job.error = AskResultError(code="STOPPED", message="Stopped by user")
+        job.status_history.append(StatusHistoryItem(stage="stopped", status="stopped", ts=_now_ts()))
+        job.updated_at = _now_ts()
     return StopAskResponse(query_id=query_id)

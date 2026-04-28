@@ -745,8 +745,9 @@
                     const text = document.createElement('span');
                     text.className = 'message-status-text';
                     text.textContent = block.content || '';
+                    text.style.whiteSpace = 'pre-line';
                     status.appendChild(text);
-                    if (turn.status === 'streaming') {
+                    if (turn.status === 'streaming' && block.showDots !== false) {
                         const dots = document.createElement('span');
                         dots.className = 'message-status-dots';
                         dots.textContent = '...';
@@ -850,6 +851,31 @@
                 failed: 'Failed',
                 stopped: 'Stopped',
             };
+            const progressStatuses = ['understanding', 'searching', 'planning', 'generating', 'correcting', 'finished'];
+            const progressLabels = {
+                understanding: 'understanding',
+                searching: 'searching',
+                planning: 'planning',
+                generating: 'generating',
+                correcting: 'correcting',
+                finished: 'finished',
+            };
+            let seenProgressStatuses = [];
+            const terminalStatuses = new Set(['finished', 'failed', 'stopped']);
+
+            const buildProgressStatusText = (status) => {
+                if (!progressStatuses.includes(status)) {
+                    return statusLabelByName[status] || `Processing: ${String(status || 'working')}`;
+                }
+                if (!seenProgressStatuses.includes(status)) {
+                    seenProgressStatuses.push(status);
+                }
+                return seenProgressStatuses.map((step, idx) => {
+                    const isLast = idx === seenProgressStatuses.length - 1;
+                    const isDone = !isLast || terminalStatuses.has(status);
+                    return `${progressLabels[step]}...${isDone ? 'done' : ''}`;
+                }).join('\n');
+            };
 
             const mapFinalTurn = (data) => ({
                 id: data.turn_id,
@@ -888,8 +914,21 @@
                     state.conversationId = result.conversation_id;
                 }
 
-                const statusText = statusLabelByName[result.status] || `Processing: ${String(result.stage || result.status || 'working')}`;
-                upsertBlock('status', { type: 'status', content: statusText });
+                if (Array.isArray(result.status_history) && result.status_history.length) {
+                    const statusSequence = result.status_history
+                        .map((item) => item && item.status)
+                        .filter((status) => progressStatuses.includes(status));
+                    const uniqueSequence = [];
+                    for (const status of statusSequence) {
+                        if (!uniqueSequence.includes(status)) {
+                            uniqueSequence.push(status);
+                        }
+                    }
+                    seenProgressStatuses = uniqueSequence;
+                }
+
+                const statusText = buildProgressStatusText(result.status);
+                upsertBlock('status', { type: 'status', content: statusText, showDots: false });
 
                 if (result.sql) {
                     turn.sql = result.sql;

@@ -113,3 +113,43 @@ PowerShell (from `backend-python/`):
 $env:PYTHONPATH="src"
 python -m app.mcp
 ```
+
+
+## workflow ##
+
+### Main Flow (Data Query path)
+
+1. **User prompt**
+2. **Validate + setup**
+   - conversation create/check
+   - context prompt build (history sathe)
+3. **Intent detect**
+4. **Route**
+   - if `CONVERSATION` -> conversation reply path
+   - else -> data query (skill orchestrator) path
+5. **Get schema** (`get_schema`)
+6. **Generate SQL plan** (`reasoning_plan` from `generate_sql`)
+7. **Generate SQL from plan** (`generate_sql`)
+8. **Validate SQL** (`validate_sql`)
+9. **Execute query** (`execute_sql`)
+   - fail thay to: `correct_sql` -> `validate_sql` -> retry execute
+10. **Decide visualization skill**
+   - `generate_chart` (chart/table/kpi intent decide kare)
+11. **Build response blocks** (`build_response`)
+12. **Save turn** (history ma persist)
+
+---
+
+### Conversation Flow (non-data)
+
+1. **User prompt**
+2. **Validate + setup**
+3. **Intent detect = CONVERSATION**
+4. **Generate conversation reply**
+5. **Save turn**
+
+---
+
+### Important note:
+- Data-query path ma system **agent loop** use kare chhe (action-by-action tool decision),  
+  ane jo error ave to deterministic fallback flow par shift thay chhe.
